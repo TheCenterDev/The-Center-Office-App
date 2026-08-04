@@ -25,9 +25,11 @@ HOW TO ADD OR UPDATE DOCUMENTS
 
 HOW TO ADD A REAL LOGO
 ------------------------
-Drop a square image (PNG/JPG, transparent background recommended,
-~120x120px) at `assets/logo.png` next to this program. It replaces
-the round placeholder mark automatically — no code changes needed.
+Drop an image (PNG/JPG, transparent background recommended) at
+`assets/logo.png` next to this program. It replaces the round
+placeholder mark automatically — no code changes needed. The logo
+is drawn at a fixed height with its real aspect ratio preserved, so
+it doesn't need to be square.
 
 RUNNING THIS PROGRAM
 ---------------------
@@ -65,25 +67,29 @@ APP_TAGLINE = "Office Tools"
 WINDOW_TITLE = f"{APP_NAME} — {APP_TAGLINE}"
 WINDOW_SIZE = "980x640"
 
-# ---- palette: dark banner up top, light card-based body below --------
-BANNER_BG = "#171b26"
-BODY_BG = "#f4f5f9"
+# ---- palette: real Center brand colors (navy banner, cyan accent, white
+# body) — extracted directly from assets/logo.png -----------------------
+BANNER_BG = "#1D2071"  # Center navy
+BODY_BG = "#ffffff"
 CARD_BG = "#ffffff"
-BORDER = "#e3e5ee"
-ACCENT = "#5865f2"
-ACCENT_HOVER = "#4752c4"
-ACCENT_SOFT = "#eef0fe"
-TEXT_DARK = "#1f2433"
+BORDER = "#dde1ee"
+ACCENT = "#00C0F3"  # Center cyan
+ACCENT_HOVER = "#00A3D1"
+ACCENT_SOFT = "#e3f8ff"
+TEXT_DARK = "#1D2071"
 TEXT_MUTED = "#6b7280"
 TEXT_ON_DARK = "#ffffff"
-TEXT_ON_DARK_MUTED = "#aab0c6"
+TEXT_ON_DARK_MUTED = "#9fd6f0"
 
 FONT_FAMILY = "Segoe UI"
 
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 ORDER_PREFIX_RE = re.compile(r"^\d+[\s_.\-]+")
 
-LOGO_SIZE = 56  # px, square — keep any real assets/logo.* near this size
+LOGO_SIZE = 56  # px, square — used only for the placeholder mark when no
+                # real logo file is present
+LOGO_HEIGHT = 64  # px tall — real logo.png is drawn at this height, with
+                  # its width scaled to match its actual aspect ratio
 
 
 def get_base_dir() -> Path:
@@ -150,15 +156,22 @@ def discover_documents():
     return docs
 
 
-def load_logo_image(size=LOGO_SIZE):
-    """Load a real logo from assets/ if one has been dropped in there."""
+def load_logo_image(height=LOGO_HEIGHT):
+    """Load a real logo from assets/ if one has been dropped in there.
+
+    Sized by height, with width derived from the image's own aspect
+    ratio — so a non-square logo (like The Center's wordmark-style
+    mark) isn't squashed or stretched into a square.
+    """
     if Image is None:
         return None
     for candidate in (ASSETS_DIR / "logo.png", ASSETS_DIR / "logo.jpg", ASSETS_DIR / "logo.jpeg"):
         if candidate.exists():
             try:
                 img = Image.open(candidate)
-                return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
+                width_px, height_px = img.size
+                width = max(1, round(height * (width_px / height_px)))
+                return ctk.CTkImage(light_image=img, dark_image=img, size=(width, height))
             except Exception:
                 pass
     return None
