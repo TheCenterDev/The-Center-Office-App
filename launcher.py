@@ -6,15 +6,23 @@ The Center — Office Tools
 A simple desktop app for new office members. The home page shows a
 grid of tiles ("waffle") — one per HTML guide kept in the `html/`
 folder next to this program. Clicking a tile opens it right inside
-the app. The only exception is interactive HTML "programs" (anything
-with real JavaScript logic, like a calculator or reconciliation
-tool) — those open in your default web browser instead, since the
-in-app viewer can't run JavaScript.
+the app:
 
-Built with CustomTkinter for a modern look, plus tkinterweb for the
-in-app HTML viewer. Install both once with:
+- Plain guides open in a lightweight built-in viewer (tkinterweb).
+- Interactive HTML "programs" (anything with real JavaScript logic,
+  like a calculator or reconciliation tool) open in their own native
+  app window powered by pywebview, which uses the OS's real web
+  engine (WebKit on Mac, WebView2 on Windows) — full JavaScript,
+  file uploads, and downloads all work, still without leaving a
+  browser tab behind.
+- If pywebview isn't installed, those documents fall back to opening
+  in your default web browser instead.
 
-    pip install customtkinter tkinterweb
+Built with CustomTkinter for the interface, tkinterweb for the
+lightweight in-app viewer, and pywebview for interactive tools.
+Install all three once with:
+
+    pip install customtkinter tkinterweb pywebview
 
 HOW TO ADD OR UPDATE DOCUMENTS
 -------------------------------
@@ -38,14 +46,14 @@ it doesn't need to be square.
 
 HOW IN-APP VIEWING WORKS
 --------------------------
-Documents open inside the app's own viewer by default. If a document
-contains a <script> tag (i.e. it's an interactive tool, not just a
-guide), it opens in your default browser instead — the in-app viewer
-is HTML/CSS only and doesn't run JavaScript.
+Plain guides open in the built-in viewer, embedded in the window.
+Documents containing a <script> tag (interactive tools) instead open
+in their own pywebview-powered window — a real web engine, so
+JavaScript, file uploads, and downloads all work normally.
 
 RUNNING THIS PROGRAM
 ---------------------
-    pip install customtkinter tkinterweb
+    pip install customtkinter tkinterweb pywebview
     python3 launcher.py
 
 See README.md for full instructions, including how to package this
@@ -54,6 +62,7 @@ without installing Python.
 """
 
 import re
+import subprocess
 import sys
 import webbrowser
 from pathlib import Path
@@ -77,7 +86,12 @@ except ImportError:
 try:
     from tkinterweb import HtmlFrame
 except ImportError:
-    HtmlFrame = None  # falls back to opening every document in the browser
+    HtmlFrame = None  # falls back to opening static guides in the browser
+
+try:
+    import webview
+except ImportError:
+    webview = None  # falls back to opening interactive tools in the browser
 
 APP_NAME = "The Center"
 APP_TAGLINE = "Office Tools"
@@ -386,9 +400,10 @@ class LauncherApp:
         clickable = [tile, icon, label]
 
         if is_program:
+            hint_text = "Opens in a tool window ↗" if webview is not None else "Opens in browser ↗"
             hint = ctk.CTkLabel(
                 tile,
-                text="Opens in browser ↗",
+                text=hint_text,
                 font=(FONT_FAMILY, 9),
                 text_color=TEXT_MUTED,
                 fg_color="transparent",
@@ -471,16 +486,43 @@ class LauncherApp:
             tile.grid(row=row, column=col, padx=10, pady=10, sticky="n")
 
     def open_document(self, path: Path, is_program: bool = False, title: str = ""):
-        """Entry point from a tile click. Interactive programs — and any
-        document if tkinterweb isn't installed — open in the real
-        browser. Everything else opens in the in-app viewer."""
+        """Entry point from a tile click.
+
+        - Interactive programs open in their own pywebview window (a real
+          web engine — full JavaScript, file uploads, downloads), or the
+          system browser if pywebview isn't installed.
+        - Everything else opens in the in-app viewer, or the system
+          browser if tkinterweb isn't installed.
+        """
         if not path.exists():
             messagebox.showerror(WINDOW_TITLE, f"File not found:\n{path}\n\nClick Refresh and try again.")
             return
-        if is_program or HtmlFrame is None:
+        if is_program:
+            self._open_program(path, title)
+            return
+        if HtmlFrame is None:
             webbrowser.open(path.resolve().as_uri())
             return
         self._show_viewer(title, path)
+
+    def _open_program(self, path: Path, title: str):
+        """Launch an interactive tool in its own pywebview window, spawned
+        as a separate process. pywebview needs to run its own event loop
+        on the main thread, same as Tkinter does — so rather than fight
+        over one thread, the tool runs as a fresh invocation of this same
+        program with a hidden `--webview` flag (see run_webview_window /
+        main() below), which never touches Tkinter at all."""
+        if webview is not None:
+            try:
+                args = [sys.executable]
+                if not getattr(sys, "frozen", False):
+                    args.append(str(Path(__file__).resolve()))
+                args += ["--webview", str(path.resolve()), title or APP_NAME]
+                subprocess.Popen(args)
+                return
+            except Exception:
+                pass
+        webbrowser.open(path.resolve().as_uri())
 
     # ------------------------------------------------------------ viewer --
     def _show_viewer(self, title: str, path: Path):
@@ -559,9 +601,10 @@ class LauncherApp:
         messagebox.showinfo(
             "How to Use This Launcher",
             "1. Click any tile to open that guide right here in the app.\n"
-            "2. Tiles marked \"Opens in browser\" are interactive tools that "
-            "need a real browser to run — clicking them opens your default "
-            "browser instead.\n"
+            "2. Tiles marked \"Opens in a tool window\" (or \"Opens in "
+            "browser\") are interactive tools that need real JavaScript to "
+            "run — clicking them opens a separate window for that tool "
+            "instead of the in-app viewer.\n"
             "3. Use \"← Back to Home\" (top left of a document) to return to "
             "the tile grid.\n"
             "4. Use Search to quickly find a tile by name.\n"
@@ -571,7 +614,32 @@ class LauncherApp:
         )
 
 
+def run_webview_window(file_path: str, title: str):
+    """Runs a single interactive tool in its own pywebview window.
+
+    This is invoked as a fresh, separate process (see
+    LauncherApp._open_program) rather than from inside the main Tkinter
+    app, because pywebview needs to run its own event loop on the main
+    thread — the same requirement Tkinter's root.mainloop() has. Two
+    GUI toolkits can't share one main thread, so instead of fighting
+    over it, the tool gets a whole process to itself.
+    """
+    if webview is None:
+        print("pywebview is required to open this tool but isn't installed.")
+        sys.exit(1)
+    webview.create_window(title, url=Path(file_path).resolve().as_uri())
+    webview.start()
+
+
 def main():
+    # Hidden mode used internally to open one interactive tool in its own
+    # window — see run_webview_window's docstring for why this is a
+    # separate process instead of a function call.
+    if len(sys.argv) >= 3 and sys.argv[1] == "--webview":
+        title = sys.argv[3] if len(sys.argv) > 3 else APP_NAME
+        run_webview_window(sys.argv[2], title)
+        return
+
     HTML_DIR.mkdir(exist_ok=True)
     ASSETS_DIR.mkdir(exist_ok=True)
     root = ctk.CTk()

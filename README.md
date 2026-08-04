@@ -2,16 +2,22 @@
 
 A small desktop app for new office members. The home page shows a grid of
 tiles (a "waffle") — one per HTML guide in the `html/` folder — and clicking
-a tile opens it right inside the app. Interactive HTML tools (anything with
-real JavaScript, like a calculator or reconciliation tool) open in the
-default web browser instead, since the in-app viewer only renders HTML/CSS.
-Built with [CustomTkinter](https://customtkinter.tomschimansky.com/) for the
-interface and [tkinterweb](https://github.com/Andereoo/TkinterWeb) for the
-in-app document viewer.
+a tile opens it right inside the app:
 
-The window opens with a dark banner showing a placeholder logo, the "The
-Center" wordmark, and an "Office Tools" tagline underneath — so it's
-obvious what the program is for even before real branding is added.
+- Plain guides open in a lightweight built-in viewer
+  ([tkinterweb](https://github.com/Andereoo/TkinterWeb)).
+- Interactive HTML tools (anything with real JavaScript, like a calculator
+  or reconciliation tool) open in their own native window powered by
+  [pywebview](https://pywebview.flowrl.com/), which uses the OS's real web
+  engine (WebKit on Mac, WebView2 on Windows) — full JavaScript, file
+  uploads, and downloads all work. If pywebview isn't installed, those
+  tools fall back to opening in the default web browser instead.
+
+Built with [CustomTkinter](https://customtkinter.tomschimansky.com/) for
+the interface.
+
+The window opens with a white banner showing the real logo, the "The
+Center" wordmark in navy, and an "Office Tools" tagline in cyan underneath.
 
 ## Download and run (easiest way — no setup required)
 
@@ -57,11 +63,11 @@ TheCenterOfficeLauncher/
 
 ## Running it (from source)
 
-Requires Python 3.8+. Install the two dependencies once (this also pulls in
-Pillow, which CustomTkinter needs for images):
+Requires Python 3.8+. Install the three dependencies once (this also pulls
+in Pillow, which CustomTkinter needs for images):
 
 ```
-pip install customtkinter tkinterweb
+pip install customtkinter tkinterweb pywebview
 ```
 
 Then run:
@@ -72,8 +78,10 @@ python3 launcher.py
 
 If `customtkinter` isn't installed, the app prints the install command
 above and exits cleanly instead of crashing. If `tkinterweb` isn't
-installed, the app still runs — every document just opens in the browser
-instead of the in-app viewer.
+installed, guides just open in the browser instead of the in-app viewer.
+If `pywebview` isn't installed, interactive tools open in the browser
+instead of their own window. Nothing ever crashes over a missing optional
+dependency — it just falls back to the browser.
 
 ## Adding or updating documents
 
@@ -111,7 +119,7 @@ Use [PyInstaller](https://pyinstaller.org/) to build a single executable
 that colleagues can double-click without installing Python.
 
 ```
-pip install pyinstaller customtkinter tkinterweb
+pip install pyinstaller customtkinter tkinterweb pywebview
 ```
 
 **Windows** — produces `dist/TheCenterOfficeLauncher.exe`:
@@ -130,10 +138,11 @@ The `--collect-all customtkinter` flag is required — CustomTkinter ships
 its own theme and font files that PyInstaller won't find automatically.
 Likewise, `--collect-all tkinterweb --collect-all tkinterweb_tkhtml` is
 required for the in-app document viewer — tkinterweb ships a compiled
-Tkhtml engine per platform that PyInstaller won't find automatically. The
-app will still start without these, but documents will either open in the
-browser automatically or show a friendly "couldn't display" message with
-an Open in Browser button, instead of rendering in-app.
+Tkhtml engine per platform that PyInstaller won't find automatically.
+`pywebview` doesn't need a `--collect-all` flag — it ships its own
+PyInstaller hook that's picked up automatically. Any of these three can be
+missing without the app crashing: guides and tools just fall back to
+opening in the browser instead of rendering in-app / their own window.
 
 Add `--icon=youricon.ico` (Windows) or `--icon=youricon.icns` (Mac) if you
 have a custom icon.
@@ -189,8 +198,9 @@ This is also built into the app via the **"How to Use This Launcher"**
 button, so new hires can self-serve:
 
 1. Click any tile on the home page to open it right in the app.
-2. Tiles marked **"Opens in browser"** are interactive tools that need a
-   real browser to run — clicking them opens your default browser instead.
+2. Tiles marked **"Opens in a tool window"** are interactive tools that need
+   real JavaScript to run — clicking them opens a separate window for that
+   tool (or your default browser, if pywebview isn't installed).
 3. Use **← Back to Home** (top left of a document) to return to the tiles.
 4. Use **Search** to filter the tiles by name.
 5. If an expected document is missing, ask an admin to add it to `html/`,
