@@ -1,0 +1,118 @@
+name: Build and Release
+
+# Builds TheCenterOfficeLauncher for both Windows and Mac on GitHub's own
+# machines, then publishes both as a single "Latest Build" GitHub Release.
+#
+# Anyone (you or a new office member) can go to the repo's "Releases"
+# section, download the zip for their OS, unzip it, and run the app
+# immediately — no Python, no pip, no pyinstaller, no manual folder
+# assembly required.
+#
+# Runs automatically on every push to main, or on demand via the
+# "Run workflow" button in the Actions tab.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # required so this workflow can publish a Release
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyinstaller customtkinter
+
+      - name: Build executable
+        run: pyinstaller --onefile --windowed --collect-all customtkinter --name "TheCenterOfficeLauncher" launcher.py
+
+      - name: Assemble release folder (exe + html + assets)
+        shell: cmd
+        run: |
+          mkdir release
+          copy dist\TheCenterOfficeLauncher.exe release\
+          xcopy /E /I html release\html
+          if exist assets (xcopy /E /I assets release\assets) else (mkdir release\assets)
+
+      - name: Zip it up
+        shell: pwsh
+        run: Compress-Archive -Path release\* -DestinationPath TheCenterOfficeLauncher-Windows.zip
+
+      - name: Upload build as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: TheCenterOfficeLauncher-Windows.zip
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyinstaller customtkinter
+
+      - name: Build app
+        run: pyinstaller --windowed --collect-all customtkinter --name "TheCenterOfficeLauncher" launcher.py
+
+      - name: Assemble release folder (app + html + assets)
+        run: |
+          mkdir release
+          cp -R dist/TheCenterOfficeLauncher.app release/
+          cp -R html release/
+          if [ -d assets ]; then cp -R assets release/; else mkdir release/assets; fi
+
+      - name: Zip it up
+        run: (cd release && zip -r ../TheCenterOfficeLauncher-Mac.zip .)
+
+      - name: Upload build as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-zip
+          path: TheCenterOfficeLauncher-Mac.zip
+
+  release:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+
+      - name: Download Mac build
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-zip
+
+      - name: Publish / update the "Latest Build" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest Build"
+          make_latest: true
+          body: >
+            Automatically rebuilt from the latest code on main.
+            Download the zip for your OS, unzip it, and run —
+            no setup required. On Mac, right-click the app and
+            choose "Open" the first time (Gatekeeper warning).
+          files: |
+            TheCenterOfficeLauncher-Windows.zip
+            TheCenterOfficeLauncher-Mac.zip
