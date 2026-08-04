@@ -67,9 +67,10 @@ APP_TAGLINE = "Office Tools"
 WINDOW_TITLE = f"{APP_NAME} — {APP_TAGLINE}"
 WINDOW_SIZE = "980x640"
 
-# ---- palette: real Center brand colors (navy banner, cyan accent, white
-# body) — extracted directly from assets/logo.png -----------------------
-BANNER_BG = "#1D2071"  # Center navy
+# ---- palette: real Center brand colors — extracted directly from
+# assets/logo.png. White banner + body, with navy (dark blue) and cyan
+# (light blue) used for text, accents, and interactive elements. --------
+BANNER_BG = "#ffffff"
 BODY_BG = "#ffffff"
 CARD_BG = "#ffffff"
 BORDER = "#dde1ee"
@@ -86,9 +87,9 @@ FONT_FAMILY = "Segoe UI"
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 ORDER_PREFIX_RE = re.compile(r"^\d+[\s_.\-]+")
 
-LOGO_SIZE = 56  # px, square — used only for the placeholder mark when no
+LOGO_SIZE = 64  # px, square — used only for the placeholder mark when no
                 # real logo file is present
-LOGO_HEIGHT = 64  # px tall — real logo.png is drawn at this height, with
+LOGO_HEIGHT = 84  # px tall — real logo.png is drawn at this height, with
                   # its width scaled to match its actual aspect ratio
 
 
@@ -203,26 +204,32 @@ class LauncherApp:
         banner = ctk.CTkFrame(self.root, fg_color=BANNER_BG, corner_radius=0)
         banner.pack(fill="x")
 
-        logo_holder = ctk.CTkFrame(banner, fg_color=BANNER_BG)
-        logo_holder.pack(side="left", padx=(28, 16), pady=22)
+        # Everything centered: logo on top, title + tagline stacked below it.
+        content = ctk.CTkFrame(banner, fg_color=BANNER_BG)
+        content.pack(pady=(30, 22))
+
+        logo_holder = ctk.CTkFrame(content, fg_color=BANNER_BG)
+        logo_holder.pack()
         self._render_logo(logo_holder)
 
-        text_holder = ctk.CTkFrame(banner, fg_color=BANNER_BG)
-        text_holder.pack(side="left", fill="y", pady=22)
         ctk.CTkLabel(
-            text_holder,
+            content,
             text=APP_NAME,
             font=(FONT_FAMILY, 26, "bold"),
-            text_color=TEXT_ON_DARK,
+            text_color=TEXT_DARK,
             fg_color=BANNER_BG,
-        ).pack(anchor="w")
+        ).pack(pady=(12, 0))
         ctk.CTkLabel(
-            text_holder,
+            content,
             text=APP_TAGLINE,
             font=(FONT_FAMILY, 13),
-            text_color=TEXT_ON_DARK_MUTED,
+            text_color=ACCENT,
             fg_color=BANNER_BG,
-        ).pack(anchor="w", pady=(2, 0))
+        ).pack(pady=(2, 0))
+
+        # Thin divider so the white banner still reads as a distinct
+        # section from the white body underneath it.
+        ctk.CTkFrame(self.root, fg_color=BORDER, height=1, corner_radius=0).pack(fill="x")
 
     def _render_logo(self, parent):
         """Show a real logo if assets/logo.* exists, otherwise a clean
@@ -360,7 +367,7 @@ class LauncherApp:
                 text=text,
                 font=(FONT_FAMILY, 11),
                 fg_color="transparent",
-                hover_color="#e9ebf3",
+                hover_color=ACCENT_SOFT,
                 text_color=TEXT_DARK,
                 border_width=1,
                 border_color=BORDER,
