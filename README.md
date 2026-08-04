@@ -10,14 +10,10 @@ a tile opens it right inside the app:
   or reconciliation tool) open in their own native window powered by
   [pywebview](https://pywebview.flowrl.com/), which uses the OS's real web
   engine (WebKit on Mac, WebView2 on Windows) — full JavaScript, file
-  uploads, and downloads all work. pywebview has no way to embed that
-  window inside the launcher's own window, so the launcher window hides
-  the instant a tool opens and reappears automatically once the tool
-  window is closed — it feels like switching to a page and back, even
-  though it's technically a second window. If pywebview isn't installed,
-  those tools fall back to opening in the default web browser instead
-  (and the launcher window stays open, since browser tabs don't need
-  that treatment).
+  uploads, and downloads all work. The launcher window stays open the
+  whole time; the tool just opens alongside it in its own window. If
+  pywebview isn't installed, those tools fall back to opening in the
+  default web browser instead.
 
 Built with [CustomTkinter](https://customtkinter.tomschimansky.com/) for
 the interface.

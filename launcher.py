@@ -513,37 +513,19 @@ class LauncherApp:
         program with a hidden `--webview` flag (see run_webview_window /
         main() below), which never touches Tkinter at all.
 
-        pywebview has no supported way to embed its window inside this
-        one (unlike tkinterweb), so it's a genuinely separate window. To
-        still make it feel like navigating to a page rather than opening
-        a second app, the launcher window hides the instant the tool
-        opens and reappears automatically once the tool window closes."""
+        The launcher window stays open the whole time — the tool just
+        opens alongside it in its own window."""
         if webview is not None:
             try:
                 args = [sys.executable]
                 if not getattr(sys, "frozen", False):
                     args.append(str(Path(__file__).resolve()))
                 args += ["--webview", str(path.resolve()), title or APP_NAME]
-                proc = subprocess.Popen(args)
-                self.root.withdraw()
-                self._watch_program_process(proc)
+                subprocess.Popen(args)
                 return
             except Exception:
                 pass
         webbrowser.open(path.resolve().as_uri())
-
-    def _watch_program_process(self, proc: subprocess.Popen):
-        """Polls the tool's process and brings the launcher window back
-        once it exits. There's no direct "the other window closed" event
-        to listen for across processes, so a periodic check via
-        Tkinter's own event loop (not a thread) is the simplest reliable
-        way to notice."""
-        if proc.poll() is None:
-            self.root.after(300, lambda: self._watch_program_process(proc))
-            return
-        self.root.deiconify()
-        self.root.lift()
-        self.root.focus_force()
 
     # ------------------------------------------------------------ viewer --
     def _show_viewer(self, title: str, path: Path):
