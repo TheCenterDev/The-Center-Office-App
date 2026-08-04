@@ -3,9 +3,10 @@
 The Center — Office Tools
 ==========================
 
-A simple desktop app for new office members. It lists the HTML guides
-kept in the `html/` folder next to this program and opens whichever
-one they pick in their default web browser.
+A simple desktop app for new office members. The home page shows a
+grid of tiles ("waffle") — one per HTML guide kept in the `html/`
+folder next to this program — and opens whichever one they click in
+their default web browser.
 
 Built with CustomTkinter for a modern look. Install it once with:
 
@@ -75,12 +76,9 @@ BODY_BG = "#ffffff"
 CARD_BG = "#ffffff"
 BORDER = "#dde1ee"
 ACCENT = "#00C0F3"  # Center cyan
-ACCENT_HOVER = "#00A3D1"
 ACCENT_SOFT = "#e3f8ff"
-TEXT_DARK = "#1D2071"
+TEXT_DARK = "#1D2071"  # Center navy
 TEXT_MUTED = "#6b7280"
-TEXT_ON_DARK = "#ffffff"
-TEXT_ON_DARK_MUTED = "#9fd6f0"
 
 FONT_FAMILY = "Segoe UI"
 
@@ -91,6 +89,11 @@ LOGO_SIZE = 64  # px, square — used only for the placeholder mark when no
                 # real logo file is present
 LOGO_HEIGHT = 84  # px tall — real logo.png is drawn at this height, with
                   # its width scaled to match its actual aspect ratio
+
+GRID_COLUMNS = 4  # tiles per row on the home page "waffle"
+TILE_WIDTH = 150
+TILE_HEIGHT = 120
+TILE_ICON_SIZE = 48
 
 
 def get_base_dir() -> Path:
@@ -183,8 +186,6 @@ class LauncherApp:
         self.root = root
         self.documents = []  # list of (sort_key, title, path)
         self.filtered = []
-        self._selected_path = None
-        self._row_buttons = {}  # path -> CTkButton, for highlighting the active row
         self._logo_image = load_logo_image()
 
         ctk.set_appearance_mode("light")
@@ -251,11 +252,11 @@ class LauncherApp:
 
     # ------------------------------------------------------------- body --
     def _build_body(self):
+        """Home page: a search box up top, then a grid of clickable tiles
+        (a 'waffle') — one per document — that open straight to the
+        browser when clicked. Replaces the old list + details layout."""
         body = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
         body.pack(fill="both", expand=True, padx=28, pady=(20, 22))
-        body.grid_columnconfigure(0, weight=3)
-        body.grid_columnconfigure(1, weight=2)
-        body.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(
             body,
@@ -263,32 +264,21 @@ class LauncherApp:
             font=(FONT_FAMILY, 13, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
-        ).grid(row=0, column=0, columnspan=2, sticky="w")
+        ).pack(anchor="w")
         ctk.CTkLabel(
             body,
-            text="Pick a guide below and open it — everything a new team member needs, in one place.",
+            text="Pick a tile below to open a guide or tool in your browser.",
             font=(FONT_FAMILY, 11),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 14))
+        ).pack(anchor="w", pady=(2, 14))
 
-        self._build_list_card(body)
-        self._build_detail_card(body)
-        self._build_toolbar(body)
-
-    def _build_list_card(self, body):
-        card = ctk.CTkFrame(body, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
-        card.grid(row=2, column=0, sticky="nsew", padx=(0, 16))
-        card.grid_rowconfigure(1, weight=1)
-        card.grid_columnconfigure(0, weight=1)
-
-        search_row = ctk.CTkFrame(card, fg_color=CARD_BG)
-        search_row.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 10))
-        search_row.grid_columnconfigure(0, weight=1)
+        search_row = ctk.CTkFrame(body, fg_color=BODY_BG)
+        search_row.pack(fill="x", pady=(0, 14))
 
         self.search_var = StringVar()
         self.search_var.trace_add("write", lambda *_: self._apply_filter())
-        search_entry = ctk.CTkEntry(
+        ctk.CTkEntry(
             search_row,
             textvariable=self.search_var,
             placeholder_text="Search documents…",
@@ -296,70 +286,85 @@ class LauncherApp:
             height=36,
             corner_radius=8,
             border_color=BORDER,
-        )
-        search_entry.grid(row=0, column=0, sticky="ew")
+        ).pack(fill="x")
 
-        self.list_scroll = ctk.CTkScrollableFrame(card, fg_color=CARD_BG, corner_radius=0)
-        self.list_scroll.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 12))
-        self.list_scroll.grid_columnconfigure(0, weight=1)
+        self.grid_scroll = ctk.CTkScrollableFrame(body, fg_color=BODY_BG, corner_radius=0)
+        self.grid_scroll.pack(fill="both", expand=True)
+        for col in range(GRID_COLUMNS):
+            self.grid_scroll.grid_columnconfigure(col, weight=1)
 
         self.empty_label = ctk.CTkLabel(
-            self.list_scroll,
+            self.grid_scroll,
             text="No documents found yet.",
             font=(FONT_FAMILY, 11),
             text_color=TEXT_MUTED,
-            fg_color=CARD_BG,
-        )
-
-    def _build_detail_card(self, body):
-        card = ctk.CTkFrame(body, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
-        card.grid(row=2, column=1, sticky="nsew")
-
-        inner = ctk.CTkFrame(card, fg_color=CARD_BG)
-        inner.pack(fill="both", expand=True, padx=20, pady=20)
-
-        ctk.CTkLabel(
-            inner, text="DETAILS", font=(FONT_FAMILY, 11, "bold"), text_color=TEXT_MUTED, fg_color=CARD_BG
-        ).pack(anchor="w")
-        self.detail_title = ctk.CTkLabel(
-            inner,
-            text="Select a document",
-            font=(FONT_FAMILY, 18, "bold"),
-            text_color=TEXT_DARK,
-            fg_color=CARD_BG,
-            wraplength=300,
+            fg_color=BODY_BG,
             justify="left",
         )
-        self.detail_title.pack(anchor="w", pady=(6, 4))
 
-        self.detail_path = ctk.CTkLabel(
-            inner,
-            text="",
-            font=(FONT_FAMILY, 11),
-            text_color=TEXT_MUTED,
+        self._build_toolbar(body)
+
+    def _build_tile(self, parent, index, title, path):
+        """One waffle tile: a colored icon badge (alternating navy/cyan,
+        the brand colors) with the document's first letter, and its
+        title underneath. The whole tile is clickable and opens the
+        document directly — no intermediate page."""
+        badge_bg = TEXT_DARK if index % 2 == 0 else ACCENT  # navy / cyan, alternating
+
+        tile = ctk.CTkFrame(
+            parent,
             fg_color=CARD_BG,
-            wraplength=300,
-            justify="left",
+            border_width=1,
+            border_color=BORDER,
+            corner_radius=14,
+            width=TILE_WIDTH,
+            height=TILE_HEIGHT,
         )
-        self.detail_path.pack(anchor="w", pady=(0, 20))
+        tile.grid_propagate(False)
 
-        self.open_button = ctk.CTkButton(
-            inner,
-            text="Open in Browser",
-            font=(FONT_FAMILY, 13, "bold"),
-            fg_color=ACCENT,
-            hover_color=ACCENT_HOVER,
+        icon = ctk.CTkLabel(
+            tile,
+            text=(title[:1] or "?").upper(),
+            width=TILE_ICON_SIZE,
+            height=TILE_ICON_SIZE,
+            corner_radius=12,
+            fg_color=badge_bg,
             text_color="white",
-            corner_radius=10,
-            height=42,
-            state="disabled",
-            command=self.open_selected,
+            font=(FONT_FAMILY, int(TILE_ICON_SIZE * 0.42), "bold"),
         )
-        self.open_button.pack(anchor="w")
+        icon.pack(pady=(18, 8))
+
+        label = ctk.CTkLabel(
+            tile,
+            text=title,
+            font=(FONT_FAMILY, 12, "bold"),
+            text_color=TEXT_DARK,
+            fg_color="transparent",
+            wraplength=TILE_WIDTH - 20,
+            justify="center",
+        )
+        label.pack(padx=10, pady=(0, 14))
+
+        def on_click(_event=None):
+            self.open_document(path)
+
+        def on_enter(_event=None):
+            tile.configure(fg_color=ACCENT_SOFT)
+
+        def on_leave(_event=None):
+            tile.configure(fg_color=CARD_BG)
+
+        for widget in (tile, icon, label):
+            widget.bind("<Button-1>", on_click)
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+            widget.configure(cursor="pointinghand" if sys.platform == "darwin" else "hand2")
+
+        return tile
 
     def _build_toolbar(self, body):
         toolbar = ctk.CTkFrame(body, fg_color=BODY_BG)
-        toolbar.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        toolbar.pack(fill="x", pady=(16, 0))
 
         def ghost_button(text, command):
             return ctk.CTkButton(
@@ -389,59 +394,32 @@ class LauncherApp:
         query = self.search_var.get().strip().lower()
         self.filtered = [d for d in self.documents if query in d[1].lower()] if query else list(self.documents)
 
-        for widget in self.list_scroll.winfo_children():
-            widget.pack_forget()
-        self._row_buttons = {}
+        for widget in self.grid_scroll.winfo_children():
+            widget.destroy()
 
         if not self.filtered:
-            message = "No documents match your search." if query else f"No documents found yet.\nAdd .html files to:\n{HTML_DIR}"
-            self.empty_label.configure(text=message)
-            self.empty_label.pack(anchor="w", padx=8, pady=12)
-            self.detail_title.configure(text="Select a document")
-            self.detail_path.configure(text="")
-            self.open_button.configure(state="disabled")
-            self._selected_path = None
-            return
-
-        for _key, title, path in self.filtered:
-            btn = ctk.CTkButton(
-                self.list_scroll,
-                text=f"📄   {title}",
-                anchor="w",
-                font=(FONT_FAMILY, 13),
-                fg_color=CARD_BG,
-                hover_color=ACCENT_SOFT,
-                text_color=TEXT_DARK,
-                corner_radius=8,
-                height=40,
-                command=lambda p=path, t=title: self._select_document(p, t),
+            message = (
+                "No documents match your search."
+                if query
+                else f"No documents found yet.\nAdd .html files to:\n{HTML_DIR}"
             )
-            btn.pack(fill="x", padx=4, pady=2)
-            self._row_buttons[path] = btn
-
-        # keep the previous selection highlighted if it's still in the list
-        if self._selected_path in self._row_buttons:
-            self._highlight_row(self._selected_path)
-
-    def _select_document(self, path: Path, title: str):
-        self._selected_path = path
-        self._highlight_row(path)
-        self.detail_title.configure(text=title)
-        self.detail_path.configure(text=str(path))
-        self.open_button.configure(state="normal")
-
-    def _highlight_row(self, active_path):
-        for path, btn in self._row_buttons.items():
-            if path == active_path:
-                btn.configure(fg_color=ACCENT_SOFT, text_color=ACCENT)
-            else:
-                btn.configure(fg_color=CARD_BG, text_color=TEXT_DARK)
-
-    def open_selected(self):
-        path = self._selected_path
-        if not path:
-            messagebox.showinfo(WINDOW_TITLE, "Select a document from the list first.")
+            self.empty_label = ctk.CTkLabel(
+                self.grid_scroll,
+                text=message,
+                font=(FONT_FAMILY, 11),
+                text_color=TEXT_MUTED,
+                fg_color=BODY_BG,
+                justify="left",
+            )
+            self.empty_label.grid(row=0, column=0, columnspan=GRID_COLUMNS, sticky="w", padx=8, pady=12)
             return
+
+        for index, (_key, title, path) in enumerate(self.filtered):
+            row, col = divmod(index, GRID_COLUMNS)
+            tile = self._build_tile(self.grid_scroll, index, title, path)
+            tile.grid(row=row, column=col, padx=10, pady=10, sticky="n")
+
+    def open_document(self, path: Path):
         if not path.exists():
             messagebox.showerror(WINDOW_TITLE, f"File not found:\n{path}\n\nClick Refresh and try again.")
             return
@@ -450,10 +428,9 @@ class LauncherApp:
     def show_help(self):
         messagebox.showinfo(
             "How to Use This Launcher",
-            "1. Pick a document from the list on the left.\n"
-            "2. Click 'Open in Browser' (or click the document again) to view it.\n"
-            "3. Use Search to quickly find a document by name.\n"
-            "4. If you don't see a document you expect, ask an admin to add it "
+            "1. Click any tile to open that guide or tool in your browser.\n"
+            "2. Use Search to quickly find a tile by name.\n"
+            "3. If you don't see a document you expect, ask an admin to add it "
             "to the html folder, then click Refresh.\n\n"
             "Having trouble? Contact your office administrator.",
         )
