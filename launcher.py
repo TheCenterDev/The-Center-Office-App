@@ -5,12 +5,16 @@ The Center — Office Tools
 
 A simple desktop app for new office members. The home page shows a
 grid of tiles ("waffle") — one per HTML guide kept in the `html/`
-folder next to this program — and opens whichever one they click in
-their default web browser.
+folder next to this program. Clicking a tile opens it right inside
+the app. The only exception is interactive HTML "programs" (anything
+with real JavaScript logic, like a calculator or reconciliation
+tool) — those open in your default web browser instead, since the
+in-app viewer can't run JavaScript.
 
-Built with CustomTkinter for a modern look. Install it once with:
+Built with CustomTkinter for a modern look, plus tkinterweb for the
+in-app HTML viewer. Install both once with:
 
-    pip install customtkinter
+    pip install customtkinter tkinterweb
 
 HOW TO ADD OR UPDATE DOCUMENTS
 -------------------------------
@@ -32,9 +36,16 @@ placeholder mark automatically — no code changes needed. The logo
 is drawn at a fixed height with its real aspect ratio preserved, so
 it doesn't need to be square.
 
+HOW IN-APP VIEWING WORKS
+--------------------------
+Documents open inside the app's own viewer by default. If a document
+contains a <script> tag (i.e. it's an interactive tool, not just a
+guide), it opens in your default browser instead — the in-app viewer
+is HTML/CSS only and doesn't run JavaScript.
+
 RUNNING THIS PROGRAM
 ---------------------
-    pip install customtkinter
+    pip install customtkinter tkinterweb
     python3 launcher.py
 
 See README.md for full instructions, including how to package this
@@ -63,6 +74,11 @@ try:
 except ImportError:
     Image = None  # CustomTkinter installs Pillow automatically; this is a fallback.
 
+try:
+    from tkinterweb import HtmlFrame
+except ImportError:
+    HtmlFrame = None  # falls back to opening every document in the browser
+
 APP_NAME = "The Center"
 APP_TAGLINE = "Office Tools"
 WINDOW_TITLE = f"{APP_NAME} — {APP_TAGLINE}"
@@ -84,6 +100,7 @@ FONT_FAMILY = "Segoe UI"
 
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 ORDER_PREFIX_RE = re.compile(r"^\d+[\s_.\-]+")
+SCRIPT_TAG_RE = re.compile(r"<script\b", re.IGNORECASE)
 
 LOGO_SIZE = 64  # px, square — used only for the placeholder mark when no
                 # real logo file is present
@@ -92,7 +109,7 @@ LOGO_HEIGHT = 84  # px tall — real logo.png is drawn at this height, with
 
 GRID_COLUMNS = 4  # tiles per row on the home page "waffle"
 TILE_WIDTH = 150
-TILE_HEIGHT = 120
+TILE_HEIGHT = 132
 TILE_ICON_SIZE = 48
 
 
@@ -148,14 +165,29 @@ def read_title(path: Path) -> str:
     return display_name_from_filename(path.name)
 
 
+def is_interactive_program(path: Path) -> bool:
+    """True if the document has any <script> tag — real JavaScript logic,
+    like a calculator or reconciliation tool, rather than a static guide.
+    The in-app viewer (tkinterweb) doesn't run JavaScript, so anything
+    interactive needs to open in a real browser instead."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return bool(SCRIPT_TAG_RE.search(text))
+
+
 def discover_documents():
-    """Return a sorted list of (sort_key, display_title, path) tuples."""
+    """Return a sorted list of (sort_key, display_title, path, is_program)
+    tuples. is_program is True for interactive HTML tools that need to
+    open in the browser instead of the in-app viewer (see
+    is_interactive_program)."""
     if not HTML_DIR.exists():
         return []
     docs = []
     for path in HTML_DIR.glob("*.htm*"):
         if path.is_file():
-            docs.append((path.name.lower(), read_title(path), path))
+            docs.append((path.name.lower(), read_title(path), path, is_interactive_program(path)))
     docs.sort(key=lambda d: d[0])
     return docs
 
@@ -184,7 +216,7 @@ def load_logo_image(height=LOGO_HEIGHT):
 class LauncherApp:
     def __init__(self, root: ctk.CTk):
         self.root = root
-        self.documents = []  # list of (sort_key, title, path)
+        self.documents = []  # list of (sort_key, title, path, is_program)
         self.filtered = []
         self._logo_image = load_logo_image()
 
@@ -252,28 +284,36 @@ class LauncherApp:
 
     # ------------------------------------------------------------- body --
     def _build_body(self):
-        """Home page: a search box up top, then a grid of clickable tiles
-        (a 'waffle') — one per document — that open straight to the
-        browser when clicked. Replaces the old list + details layout."""
+        """Builds two swappable views inside `body`: the home page
+        (search + waffle grid) and the in-app document viewer. Only one
+        is shown at a time; the toolbar at the bottom is always visible."""
         body = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
         body.pack(fill="both", expand=True, padx=28, pady=(20, 22))
 
+        self.home_frame = ctk.CTkFrame(body, fg_color=BODY_BG, corner_radius=0)
+        self.viewer_frame = ctk.CTkFrame(body, fg_color=BODY_BG, corner_radius=0)
+        self._build_home(self.home_frame)
+        self.home_frame.pack(fill="both", expand=True)
+
+        self._build_toolbar(body)
+
+    def _build_home(self, parent):
         ctk.CTkLabel(
-            body,
+            parent,
             text="Office Guides & Documents",
             font=(FONT_FAMILY, 13, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
         ).pack(anchor="w")
         ctk.CTkLabel(
-            body,
-            text="Pick a tile below to open a guide or tool in your browser.",
+            parent,
+            text="Pick a tile below to open a guide right here in the app.",
             font=(FONT_FAMILY, 11),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
         ).pack(anchor="w", pady=(2, 14))
 
-        search_row = ctk.CTkFrame(body, fg_color=BODY_BG)
+        search_row = ctk.CTkFrame(parent, fg_color=BODY_BG)
         search_row.pack(fill="x", pady=(0, 14))
 
         self.search_var = StringVar()
@@ -288,7 +328,7 @@ class LauncherApp:
             border_color=BORDER,
         ).pack(fill="x")
 
-        self.grid_scroll = ctk.CTkScrollableFrame(body, fg_color=BODY_BG, corner_radius=0)
+        self.grid_scroll = ctk.CTkScrollableFrame(parent, fg_color=BODY_BG, corner_radius=0)
         self.grid_scroll.pack(fill="both", expand=True)
         for col in range(GRID_COLUMNS):
             self.grid_scroll.grid_columnconfigure(col, weight=1)
@@ -302,13 +342,11 @@ class LauncherApp:
             justify="left",
         )
 
-        self._build_toolbar(body)
-
-    def _build_tile(self, parent, index, title, path):
+    def _build_tile(self, parent, index, title, path, is_program):
         """One waffle tile: a colored icon badge (alternating navy/cyan,
         the brand colors) with the document's first letter, and its
-        title underneath. The whole tile is clickable and opens the
-        document directly — no intermediate page."""
+        title underneath. Interactive "programs" get a small hint that
+        they'll open in the browser instead of the in-app viewer."""
         badge_bg = TEXT_DARK if index % 2 == 0 else ACCENT  # navy / cyan, alternating
 
         tile = ctk.CTkFrame(
@@ -320,7 +358,7 @@ class LauncherApp:
             width=TILE_WIDTH,
             height=TILE_HEIGHT,
         )
-        tile.grid_propagate(False)
+        tile.pack_propagate(False)
 
         icon = ctk.CTkLabel(
             tile,
@@ -332,7 +370,7 @@ class LauncherApp:
             text_color="white",
             font=(FONT_FAMILY, int(TILE_ICON_SIZE * 0.42), "bold"),
         )
-        icon.pack(pady=(18, 8))
+        icon.pack(pady=(16, 6))
 
         label = ctk.CTkLabel(
             tile,
@@ -343,10 +381,23 @@ class LauncherApp:
             wraplength=TILE_WIDTH - 20,
             justify="center",
         )
-        label.pack(padx=10, pady=(0, 14))
+        label.pack(padx=10)
+
+        clickable = [tile, icon, label]
+
+        if is_program:
+            hint = ctk.CTkLabel(
+                tile,
+                text="Opens in browser ↗",
+                font=(FONT_FAMILY, 9),
+                text_color=TEXT_MUTED,
+                fg_color="transparent",
+            )
+            hint.pack(pady=(4, 0))
+            clickable.append(hint)
 
         def on_click(_event=None):
-            self.open_document(path)
+            self.open_document(path, is_program=is_program, title=title)
 
         def on_enter(_event=None):
             tile.configure(fg_color=ACCENT_SOFT)
@@ -354,7 +405,7 @@ class LauncherApp:
         def on_leave(_event=None):
             tile.configure(fg_color=CARD_BG)
 
-        for widget in (tile, icon, label):
+        for widget in clickable:
             widget.bind("<Button-1>", on_click)
             widget.bind("<Enter>", on_enter)
             widget.bind("<Leave>", on_leave)
@@ -414,23 +465,107 @@ class LauncherApp:
             self.empty_label.grid(row=0, column=0, columnspan=GRID_COLUMNS, sticky="w", padx=8, pady=12)
             return
 
-        for index, (_key, title, path) in enumerate(self.filtered):
+        for index, (_key, title, path, is_program) in enumerate(self.filtered):
             row, col = divmod(index, GRID_COLUMNS)
-            tile = self._build_tile(self.grid_scroll, index, title, path)
+            tile = self._build_tile(self.grid_scroll, index, title, path, is_program)
             tile.grid(row=row, column=col, padx=10, pady=10, sticky="n")
 
-    def open_document(self, path: Path):
+    def open_document(self, path: Path, is_program: bool = False, title: str = ""):
+        """Entry point from a tile click. Interactive programs — and any
+        document if tkinterweb isn't installed — open in the real
+        browser. Everything else opens in the in-app viewer."""
         if not path.exists():
             messagebox.showerror(WINDOW_TITLE, f"File not found:\n{path}\n\nClick Refresh and try again.")
             return
-        webbrowser.open(path.resolve().as_uri())
+        if is_program or HtmlFrame is None:
+            webbrowser.open(path.resolve().as_uri())
+            return
+        self._show_viewer(title, path)
+
+    # ------------------------------------------------------------ viewer --
+    def _show_viewer(self, title: str, path: Path):
+        self.home_frame.pack_forget()
+
+        for widget in self.viewer_frame.winfo_children():
+            widget.destroy()
+
+        top_row = ctk.CTkFrame(self.viewer_frame, fg_color=BODY_BG)
+        top_row.pack(fill="x", pady=(0, 12))
+
+        ctk.CTkButton(
+            top_row,
+            text="← Back to Home",
+            font=(FONT_FAMILY, 11),
+            fg_color="transparent",
+            hover_color=ACCENT_SOFT,
+            text_color=TEXT_DARK,
+            border_width=1,
+            border_color=BORDER,
+            corner_radius=8,
+            height=32,
+            width=130,
+            command=self._show_home,
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            top_row,
+            text=title,
+            font=(FONT_FAMILY, 15, "bold"),
+            text_color=TEXT_DARK,
+            fg_color=BODY_BG,
+            wraplength=420,
+            justify="left",
+        ).pack(side="left", padx=(14, 0))
+
+        ctk.CTkButton(
+            top_row,
+            text="Open in Browser ↗",
+            font=(FONT_FAMILY, 11),
+            fg_color="transparent",
+            hover_color=ACCENT_SOFT,
+            text_color=ACCENT,
+            border_width=0,
+            corner_radius=8,
+            height=32,
+            command=lambda: webbrowser.open(path.resolve().as_uri()),
+        ).pack(side="right")
+
+        viewer_card = ctk.CTkFrame(
+            self.viewer_frame, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER
+        )
+        viewer_card.pack(fill="both", expand=True)
+
+        try:
+            html_view = HtmlFrame(viewer_card, messages_enabled=False)
+            html_view.pack(fill="both", expand=True, padx=1, pady=1)
+            html_view.load_file(str(path))
+        except Exception:
+            ctk.CTkLabel(
+                viewer_card,
+                text="This document couldn't be displayed in the app.\nUse \"Open in Browser\" above instead.",
+                font=(FONT_FAMILY, 12),
+                text_color=TEXT_MUTED,
+                fg_color=CARD_BG,
+                justify="center",
+            ).pack(expand=True)
+
+        self.viewer_frame.pack(fill="both", expand=True)
+
+    def _show_home(self):
+        self.viewer_frame.pack_forget()
+        self.home_frame.pack(fill="both", expand=True)
 
     def show_help(self):
         messagebox.showinfo(
             "How to Use This Launcher",
-            "1. Click any tile to open that guide or tool in your browser.\n"
-            "2. Use Search to quickly find a tile by name.\n"
-            "3. If you don't see a document you expect, ask an admin to add it "
+            "1. Click any tile to open that guide right here in the app.\n"
+            "2. Tiles marked \"Opens in browser\" are interactive tools that "
+            "need a real browser to run — clicking them opens your default "
+            "browser instead.\n"
+            "3. Use \"← Back to Home\" (top left of a document) to return to "
+            "the tile grid.\n"
+            "4. Use Search to quickly find a tile by name.\n"
+            "5. If you don't see a document you expect, ask an admin to add it "
             "to the html folder, then click Refresh.\n\n"
             "Having trouble? Contact your office administrator.",
         )

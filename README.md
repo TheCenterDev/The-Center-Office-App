@@ -1,9 +1,13 @@
 # The Center — Office Tools
 
-A small desktop app for new office members. It lists the HTML guides in the
-`html/` folder and opens whichever one they pick in their default web
-browser. Built with [CustomTkinter](https://customtkinter.tomschimansky.com/)
-for a modern, rounded, flat look (rather than plain stock Tkinter).
+A small desktop app for new office members. The home page shows a grid of
+tiles (a "waffle") — one per HTML guide in the `html/` folder — and clicking
+a tile opens it right inside the app. Interactive HTML tools (anything with
+real JavaScript, like a calculator or reconciliation tool) open in the
+default web browser instead, since the in-app viewer only renders HTML/CSS.
+Built with [CustomTkinter](https://customtkinter.tomschimansky.com/) for the
+interface and [tkinterweb](https://github.com/Andereoo/TkinterWeb) for the
+in-app document viewer.
 
 The window opens with a dark banner showing a placeholder logo, the "The
 Center" wordmark, and an "Office Tools" tagline underneath — so it's
@@ -53,11 +57,11 @@ TheCenterOfficeLauncher/
 
 ## Running it (from source)
 
-Requires Python 3.8+. Install the one extra dependency once (this also
-pulls in Pillow, which it needs for images):
+Requires Python 3.8+. Install the two dependencies once (this also pulls in
+Pillow, which CustomTkinter needs for images):
 
 ```
-pip install customtkinter
+pip install customtkinter tkinterweb
 ```
 
 Then run:
@@ -67,7 +71,9 @@ python3 launcher.py
 ```
 
 If `customtkinter` isn't installed, the app prints the install command
-above and exits cleanly instead of crashing.
+above and exits cleanly instead of crashing. If `tkinterweb` isn't
+installed, the app still runs — every document just opens in the browser
+instead of the in-app viewer.
 
 ## Adding or updating documents
 
@@ -105,24 +111,29 @@ Use [PyInstaller](https://pyinstaller.org/) to build a single executable
 that colleagues can double-click without installing Python.
 
 ```
-pip install pyinstaller customtkinter
+pip install pyinstaller customtkinter tkinterweb
 ```
 
 **Windows** — produces `dist/TheCenterOfficeLauncher.exe`:
 
 ```
-pyinstaller --onefile --windowed --collect-all customtkinter --name "TheCenterOfficeLauncher" launcher.py
+pyinstaller --onefile --windowed --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
 ```
 
 **Mac** — produces `dist/TheCenterOfficeLauncher.app`:
 
 ```
-pyinstaller --windowed --collect-all customtkinter --name "TheCenterOfficeLauncher" launcher.py
+pyinstaller --windowed --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
 ```
 
 The `--collect-all customtkinter` flag is required — CustomTkinter ships
-its own theme and font files that PyInstaller won't find automatically,
-and the app will fail to start without it.
+its own theme and font files that PyInstaller won't find automatically.
+Likewise, `--collect-all tkinterweb --collect-all tkinterweb_tkhtml` is
+required for the in-app document viewer — tkinterweb ships a compiled
+Tkhtml engine per platform that PyInstaller won't find automatically. The
+app will still start without these, but documents will either open in the
+browser automatically or show a friendly "couldn't display" message with
+an Open in Browser button, instead of rendering in-app.
 
 Add `--icon=youricon.ico` (Windows) or `--icon=youricon.icns` (Mac) if you
 have a custom icon.
@@ -177,8 +188,10 @@ icon all work normally.
 This is also built into the app via the **"How to Use This Launcher"**
 button, so new hires can self-serve:
 
-1. Pick a document from the list on the left.
-2. Click **Open in Browser** (or double-click the item).
-3. Use **Search** to filter the list by name.
-4. If an expected document is missing, ask an admin to add it to `html/`,
+1. Click any tile on the home page to open it right in the app.
+2. Tiles marked **"Opens in browser"** are interactive tools that need a
+   real browser to run — clicking them opens your default browser instead.
+3. Use **← Back to Home** (top left of a document) to return to the tiles.
+4. Use **Search** to filter the tiles by name.
+5. If an expected document is missing, ask an admin to add it to `html/`,
    then click **Refresh**.
