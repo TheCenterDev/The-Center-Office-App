@@ -99,17 +99,54 @@ No code changes needed:
 
 To remove a document, delete its file from `html/`.
 
-## Adding a real logo
+## Adding or replacing the logo
 
-Right now the banner shows a simple round placeholder mark (a colored
-circle with "T"). To replace it:
+The banner shows the real Center logo from `assets/logo.png`. To replace it:
 
-1. Save a square image (PNG or JPG), ideally around 120×120px with a
-   transparent background, as `assets/logo.png` (or `logo.jpg`).
+1. Save an image (PNG or JPG, transparent background recommended) as
+   `assets/logo.png` (or `logo.jpg`). It doesn't need to be square — it's
+   drawn at a fixed height with its real aspect ratio preserved.
 2. Restart the launcher. It's picked up automatically — no code changes.
 
-If no logo file is found, the placeholder mark is shown instead, so the
-app always looks finished.
+If no logo file is found, a plain placeholder mark (a colored circle with
+"T") is shown instead, so the app always looks finished either way.
+
+## The app icon (Dock / Finder / taskbar)
+
+`assets/icon.icns` (Mac) and `assets/icon.ico` (Windows) are the app's
+icon files, built from the real logo — this is what shows up in the Dock,
+Finder, Launchpad, and the Windows taskbar, as opposed to `assets/logo.png`
+which is what's drawn inside the app's own banner. Both are already wired
+into the GitHub Actions workflow and the manual PyInstaller commands below
+via the `--icon` flag, so every build already uses them.
+
+To replace it with a different image, regenerate both files from a square
+source PNG (ideally 1024×1024) and rebuild:
+
+```
+pip install pillow icnsutil
+python3 -c "
+from PIL import Image
+src = Image.open('your_square_logo.png')
+src.save('assets/icon.ico', sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])
+"
+python3 -c "
+from PIL import Image
+import icnsutil, tempfile, os
+src = Image.open('your_square_logo.png')
+sizes = {'icon_16x16.png': 16, 'icon_16x16@2x.png': 32, 'icon_32x32.png': 32,
+         'icon_32x32@2x.png': 64, 'icon_128x128.png': 128, 'icon_128x128@2x.png': 256,
+         'icon_256x256.png': 256, 'icon_256x256@2x.png': 512, 'icon_512x512.png': 512,
+         'icon_512x512@2x.png': 1024}
+tmp = tempfile.mkdtemp()
+icns = icnsutil.IcnsFile()
+for name, size in sizes.items():
+    p = os.path.join(tmp, name)
+    src.resize((size, size), Image.LANCZOS).save(p)
+    icns.add_media(file=p)
+icns.write('assets/icon.icns')
+"
+```
 
 ## Building manually (for developers — most people won't need this)
 
@@ -127,13 +164,13 @@ pip install pyinstaller customtkinter tkinterweb pywebview
 **Windows** — produces `dist/TheCenterOfficeLauncher.exe`:
 
 ```
-pyinstaller --onefile --windowed --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
+pyinstaller --onefile --windowed --icon=assets/icon.ico --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
 ```
 
 **Mac** — produces `dist/TheCenterOfficeLauncher.app`:
 
 ```
-pyinstaller --windowed --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
+pyinstaller --windowed --icon=assets/icon.icns --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
 ```
 
 The `--collect-all customtkinter` flag is required — CustomTkinter ships
@@ -146,8 +183,9 @@ PyInstaller hook that's picked up automatically. Any of these three can be
 missing without the app crashing: guides and tools just fall back to
 opening in the browser instead of rendering in-app / their own window.
 
-Add `--icon=youricon.ico` (Windows) or `--icon=youricon.icns` (Mac) if you
-have a custom icon.
+`--icon=assets/icon.ico` / `--icon=assets/icon.icns` set the app's Dock,
+Finder, Launchpad, and taskbar icon to the real logo (see "The app icon"
+above) — leave these off if you'd rather use PyInstaller's generic default.
 
 ### Important: keep the html/ folder next to the built app
 
