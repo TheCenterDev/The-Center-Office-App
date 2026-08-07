@@ -336,20 +336,6 @@ class LauncherApp:
         )
         self.home_button.pack(fill="x")
 
-        self.apps_button = ctk.CTkButton(
-            home_row,
-            text="Apps",
-            anchor="w",
-            font=(FONT_FAMILY, 12, "bold"),
-            fg_color=SIDEBAR_BG,
-            hover_color=SIDEBAR_HOVER,
-            text_color=SIDEBAR_TEXT,
-            corner_radius=8,
-            height=36,
-            command=self._show_apps,
-        )
-        self.apps_button.pack(fill="x", pady=(4, 0))
-
         ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(
             fill="x", padx=6, pady=(6, 0)
         )
@@ -370,6 +356,22 @@ class LauncherApp:
             text_color=SIDEBAR_TEXT,
             placeholder_text_color=SIDEBAR_TEXT_MUTED,
         ).pack(fill="x")
+
+        apps_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
+        apps_row.pack(fill="x", padx=6, pady=(0, 4))
+        self.apps_button = ctk.CTkButton(
+            apps_row,
+            text="Apps",
+            anchor="w",
+            font=(FONT_FAMILY, 12, "bold"),
+            fg_color=SIDEBAR_BG,
+            hover_color=SIDEBAR_HOVER,
+            text_color=SIDEBAR_TEXT,
+            corner_radius=8,
+            height=36,
+            command=self._show_apps,
+        )
+        self.apps_button.pack(fill="x")
 
         self.nav_scroll = ctk.CTkScrollableFrame(self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0)
         self.nav_scroll.pack(fill="both", expand=True, padx=6)
