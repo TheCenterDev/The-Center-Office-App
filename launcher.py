@@ -240,9 +240,10 @@ class LauncherApp:
         self.documents = []  # list of (sort_key, title, path, is_program)
         self.filtered = []
         self._nav_buttons = {}  # path -> CTkButton, for highlighting the active row
-        self._selected_path = None  # None means the Home page is active
+        self._selected_path = None  # None = Home, "apps" = Apps, else a document Path
         self._sidebar_expanded = True
         self.home_button = None
+        self.apps_button = None
         self._sidebar_logo = load_logo_image(LOGO_HEIGHT)
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
 
@@ -329,6 +330,20 @@ class LauncherApp:
         )
         self.home_button.pack(fill="x")
 
+        self.apps_button = ctk.CTkButton(
+            home_row,
+            text="Apps",
+            anchor="w",
+            font=(FONT_FAMILY, 12, "bold"),
+            fg_color=SIDEBAR_BG,
+            hover_color=SIDEBAR_HOVER,
+            text_color=SIDEBAR_TEXT,
+            corner_radius=8,
+            height=36,
+            command=self._show_apps,
+        )
+        self.apps_button.pack(fill="x", pady=(4, 0))
+
         ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(
             fill="x", padx=6, pady=(6, 0)
         )
@@ -412,6 +427,8 @@ class LauncherApp:
     def refresh_documents(self):
         self.documents = discover_documents()
         self._apply_filter()
+        if self._selected_path == "apps":
+            self._show_apps()
 
     def _apply_filter(self):
         query = self.search_var.get().strip().lower()
@@ -463,6 +480,11 @@ class LauncherApp:
                 self.home_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
             else:
                 self.home_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
+        if self.apps_button is not None:
+            if active_path == "apps":
+                self.apps_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
+            else:
+                self.apps_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
         for path, btn in self._nav_buttons.items():
             if path == active_path:
                 btn.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
@@ -609,7 +631,9 @@ class LauncherApp:
             "this one) display right here in the main pane. Items marked "
             "with ↗ are interactive HTML tools — they need a real browser "
             "to run, so they open an \"Open Tool\" card with a button that "
-            "launches them in their own window, without closing this app.",
+            "launches them in their own window, without closing this app. "
+            "Click Apps (also pinned at the top of the sidebar) for a "
+            "dedicated list of every interactive tool currently available.",
         )
         section(
             "Using Claude Skills",
@@ -630,6 +654,98 @@ class LauncherApp:
             "sidebar to collapse it out of the way. Questions? Contact your "
             "office administrator.",
         )
+
+    def _show_apps(self):
+        """The sidebar's pinned 'Apps' entry — a dedicated list of every
+        interactive HTML tool (anything with a <script> tag), pulled
+        straight from self.documents so a new tool shows up here
+        automatically, with no separate registration step. Unaffected
+        by the sidebar search box, same as Home."""
+        self._selected_path = "apps"
+        self._clear_content()
+        self._highlight_nav("apps")
+
+        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll.pack(fill="both", expand=True, padx=32, pady=28)
+
+        ctk.CTkLabel(
+            scroll,
+            text="Apps",
+            font=(FONT_FAMILY, 19, "bold"),
+            text_color=TEXT_DARK,
+            fg_color=BODY_BG,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            scroll,
+            text="Interactive tools that open in their own window, with full JavaScript support.",
+            font=(FONT_FAMILY, 12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+        ).pack(anchor="w", pady=(2, 18))
+
+        programs = [(title, path) for _key, title, path, is_program in self.documents if is_program]
+
+        if not programs:
+            ctk.CTkLabel(
+                scroll,
+                text="No interactive tools yet. Drop an .html file with a <script> tag into the html folder and click Refresh.",
+                font=(FONT_FAMILY, 12),
+                text_color=TEXT_MUTED,
+                fg_color=BODY_BG,
+                wraplength=520,
+                justify="left",
+            ).pack(anchor="w")
+            return
+
+        for title, path in programs:
+            card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
+            card.pack(fill="x", pady=8)
+
+            row = ctk.CTkFrame(card, fg_color=CARD_BG)
+            row.pack(fill="x", padx=18, pady=16)
+
+            ctk.CTkLabel(
+                row,
+                text=(title[:1] or "?").upper(),
+                width=36,
+                height=36,
+                corner_radius=10,
+                fg_color=TEXT_DARK,
+                text_color="white",
+                font=(FONT_FAMILY, 15, "bold"),
+            ).pack(side="left")
+
+            text_holder = ctk.CTkFrame(row, fg_color=CARD_BG)
+            text_holder.pack(side="left", padx=(14, 0), fill="x", expand=True)
+            ctk.CTkLabel(
+                text_holder,
+                text=title,
+                font=(FONT_FAMILY, 14, "bold"),
+                text_color=TEXT_DARK,
+                fg_color=CARD_BG,
+                anchor="w",
+            ).pack(fill="x")
+            ctk.CTkLabel(
+                text_holder,
+                text="Interactive tool — opens in its own window.",
+                font=(FONT_FAMILY, 11),
+                text_color=TEXT_MUTED,
+                fg_color=CARD_BG,
+                anchor="w",
+            ).pack(fill="x")
+
+            ctk.CTkButton(
+                row,
+                text="Open Tool" if webview is not None else "Open in Browser",
+                font=(FONT_FAMILY, 12, "bold"),
+                fg_color=ACCENT,
+                hover_color=TEXT_DARK,
+                text_color="white",
+                corner_radius=10,
+                height=36,
+                width=120,
+                command=lambda p=path, t=title: self._open_program(p, t),
+            ).pack(side="right")
 
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
@@ -721,7 +837,8 @@ class LauncherApp:
         messagebox.showinfo(
             "How to Use This Launcher",
             "1. Click Home (top of the sidebar) any time to return to the "
-            "welcome overview.\n"
+            "welcome overview, or Apps for a dedicated list of every "
+            "interactive tool.\n"
             "2. Click any other item in the sidebar to open it right here "
             "in the app.\n"
             "3. Items marked with ↗ are interactive tools that need real "

@@ -243,7 +243,8 @@ This is also built into the app via the **"How to Use This Launcher"**
 button, so new hires can self-serve:
 
 1. Click **Home** at the top of the sidebar any time to return to the
-   welcome overview of what the app is for.
+   welcome overview of what the app is for, or **Apps** for a dedicated
+   list of every interactive tool.
 2. Click any other item in the sidebar to open it in the main pane.
 3. Items marked with **↗** are interactive tools that need real JavaScript
    to run — they show an **Open Tool** button (or **Open in Browser**, if
