@@ -3,18 +3,19 @@
 The Center — Office Tools
 ==========================
 
-A simple desktop app for new office members. The home page shows a
-grid of tiles ("waffle") — one per HTML guide kept in the `html/`
-folder next to this program. Clicking a tile opens it right inside
-the app:
+A simple desktop app for new office members. A sidebar on the left
+lists the HTML guides kept in the `html/` folder next to this
+program; clicking one shows it in the main pane on the right, right
+inside the app:
 
 - Plain guides open in a lightweight built-in viewer (tkinterweb).
 - Interactive HTML "programs" (anything with real JavaScript logic,
-  like a calculator or reconciliation tool) open in their own native
-  app window powered by pywebview, which uses the OS's real web
-  engine (WebKit on Mac, WebView2 on Windows) — full JavaScript,
-  file uploads, and downloads all work, still without leaving a
-  browser tab behind.
+  like a calculator or reconciliation tool) show a small card with an
+  "Open Tool" button. Clicking it opens the tool in its own native
+  window powered by pywebview, which uses the OS's real web engine
+  (WebKit on Mac, WebView2 on Windows) — full JavaScript, file
+  uploads, and downloads all work, still without leaving a browser
+  tab behind. The launcher window stays open the whole time.
 - If pywebview isn't installed, those documents fall back to opening
   in your default web browser instead.
 
@@ -29,7 +30,7 @@ HOW TO ADD OR UPDATE DOCUMENTS
 1. Drop an .html file into the `html` folder next to this program
    (or next to the packaged app, see README.md).
 2. Optional: start the filename with a number to control the order
-   it appears in the list, e.g. "01_Welcome.html", "02_FAQ.html".
+   it appears in the sidebar, e.g. "01_Welcome.html", "02_FAQ.html".
    The number and underscore are stripped from the on-screen name.
 3. Optional: give the file a <title>Some Title</title> in its <head>
    — the launcher will display that instead of the filename.
@@ -46,10 +47,11 @@ it doesn't need to be square.
 
 HOW IN-APP VIEWING WORKS
 --------------------------
-Plain guides open in the built-in viewer, embedded in the window.
-Documents containing a <script> tag (interactive tools) instead open
-in their own pywebview-powered window — a real web engine, so
-JavaScript, file uploads, and downloads all work normally.
+Plain guides open in the built-in viewer, embedded in the main pane.
+Documents containing a <script> tag (interactive tools) show an
+"Open Tool" card instead — clicking it opens a pywebview-powered
+window with a real web engine, so JavaScript, file uploads, and
+downloads all work normally.
 
 RUNNING THIS PROGRAM
 ---------------------
@@ -96,12 +98,10 @@ except ImportError:
 APP_NAME = "The Center"
 APP_TAGLINE = "Office Tools"
 WINDOW_TITLE = f"{APP_NAME} — {APP_TAGLINE}"
-WINDOW_SIZE = "980x640"
+WINDOW_SIZE = "1040x640"
 
 # ---- palette: real Center brand colors — extracted directly from
-# assets/logo.png. White banner + body, with navy (dark blue) and cyan
-# (light blue) used for text, accents, and interactive elements. --------
-BANNER_BG = "#ffffff"
+# assets/logo.png. Navy sidebar, white content pane, cyan accents. ------
 BODY_BG = "#ffffff"
 CARD_BG = "#ffffff"
 BORDER = "#dde1ee"
@@ -110,21 +110,25 @@ ACCENT_SOFT = "#e3f8ff"
 TEXT_DARK = "#1D2071"  # Center navy
 TEXT_MUTED = "#6b7280"
 
+SIDEBAR_BG = TEXT_DARK
+SIDEBAR_HOVER = "#2b2f8c"
+SIDEBAR_ACTIVE = "#363bab"
+SIDEBAR_DIVIDER = "#33377a"
+SIDEBAR_TEXT = "#ffffff"
+SIDEBAR_TEXT_MUTED = "#9fd6f0"
+SIDEBAR_WIDTH = 220
+
 FONT_FAMILY = "Segoe UI"
 
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 ORDER_PREFIX_RE = re.compile(r"^\d+[\s_.\-]+")
 SCRIPT_TAG_RE = re.compile(r"<script\b", re.IGNORECASE)
 
-LOGO_SIZE = 64  # px, square — used only for the placeholder mark when no
+LOGO_SIZE = 44  # px, square — used only for the placeholder mark when no
                 # real logo file is present
-LOGO_HEIGHT = 84  # px tall — real logo.png is drawn at this height, with
-                  # its width scaled to match its actual aspect ratio
-
-GRID_COLUMNS = 4  # tiles per row on the home page "waffle"
-TILE_WIDTH = 150
-TILE_HEIGHT = 132
-TILE_ICON_SIZE = 48
+LOGO_HEIGHT = 40  # px tall in the sidebar header — real logo.png is drawn
+                  # at this height, with width scaled to its aspect ratio
+WELCOME_LOGO_HEIGHT = 72  # px tall on the welcome screen (bigger, roomier)
 
 
 def get_base_dir() -> Path:
@@ -183,7 +187,7 @@ def is_interactive_program(path: Path) -> bool:
     """True if the document has any <script> tag — real JavaScript logic,
     like a calculator or reconciliation tool, rather than a static guide.
     The in-app viewer (tkinterweb) doesn't run JavaScript, so anything
-    interactive needs to open in a real browser instead."""
+    interactive opens via pywebview (or the browser) instead."""
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -193,8 +197,7 @@ def is_interactive_program(path: Path) -> bool:
 
 def discover_documents():
     """Return a sorted list of (sort_key, display_title, path, is_program)
-    tuples. is_program is True for interactive HTML tools that need to
-    open in the browser instead of the in-app viewer (see
+    tuples. is_program is True for interactive HTML tools (see
     is_interactive_program)."""
     if not HTML_DIR.exists():
         return []
@@ -206,12 +209,14 @@ def discover_documents():
     return docs
 
 
-def load_logo_image(height=LOGO_HEIGHT):
+def load_logo_image(height):
     """Load a real logo from assets/ if one has been dropped in there.
 
     Sized by height, with width derived from the image's own aspect
     ratio — so a non-square logo (like The Center's wordmark-style
-    mark) isn't squashed or stretched into a square.
+    mark) isn't squashed or stretched into a square. Always drawn on a
+    white background (sidebar header and welcome screen are both
+    white), since the logo's navy ink would disappear against navy.
     """
     if Image is None:
         return None
@@ -232,236 +237,138 @@ class LauncherApp:
         self.root = root
         self.documents = []  # list of (sort_key, title, path, is_program)
         self.filtered = []
-        self._logo_image = load_logo_image()
+        self._nav_buttons = {}  # path -> CTkButton, for highlighting the active row
+        self._selected_path = None
+        self._sidebar_logo = load_logo_image(LOGO_HEIGHT)
+        self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
 
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
         root.title(WINDOW_TITLE)
         root.geometry(WINDOW_SIZE)
-        root.minsize(800, 520)
+        root.minsize(860, 520)
         root.configure(fg_color=BODY_BG)
 
-        self._build_banner()
-        self._build_body()
+        self._build_layout()
         self.refresh_documents()
 
-    # ----------------------------------------------------------- banner --
-    def _build_banner(self):
-        banner = ctk.CTkFrame(self.root, fg_color=BANNER_BG, corner_radius=0)
-        banner.pack(fill="x")
+    # ----------------------------------------------------------- layout --
+    def _build_layout(self):
+        container = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
+        container.pack(fill="both", expand=True)
 
-        # Everything centered: logo on top, title + tagline stacked below it.
-        content = ctk.CTkFrame(banner, fg_color=BANNER_BG)
-        content.pack(pady=(30, 22))
+        self._build_sidebar(container)
 
-        logo_holder = ctk.CTkFrame(content, fg_color=BANNER_BG)
-        logo_holder.pack()
-        self._render_logo(logo_holder)
+        self.content_frame = ctk.CTkFrame(container, fg_color=BODY_BG, corner_radius=0)
+        self.content_frame.pack(side="left", fill="both", expand=True)
+        self._show_welcome()
 
+    # ---------------------------------------------------------- sidebar --
+    def _build_sidebar(self, parent):
+        sidebar = ctk.CTkFrame(parent, fg_color=SIDEBAR_BG, corner_radius=0, width=SIDEBAR_WIDTH)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+
+        # Header stays white so the real (navy-and-cyan) logo is readable
+        # — it would disappear if drawn directly on the navy sidebar.
+        header = ctk.CTkFrame(sidebar, fg_color=BODY_BG, corner_radius=0)
+        header.pack(fill="x")
+        header_inner = ctk.CTkFrame(header, fg_color=BODY_BG)
+        header_inner.pack(padx=18, pady=18)
+        self._render_logo(header_inner, self._sidebar_logo, LOGO_SIZE)
         ctk.CTkLabel(
-            content,
-            text=APP_NAME,
-            font=(FONT_FAMILY, 26, "bold"),
-            text_color=TEXT_DARK,
-            fg_color=BANNER_BG,
-        ).pack(pady=(12, 0))
+            header_inner, text=APP_NAME, font=(FONT_FAMILY, 14, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG
+        ).pack(anchor="w", pady=(8, 0))
         ctk.CTkLabel(
-            content,
-            text=APP_TAGLINE,
-            font=(FONT_FAMILY, 13),
-            text_color=ACCENT,
-            fg_color=BANNER_BG,
-        ).pack(pady=(2, 0))
-
-        # Thin divider so the white banner still reads as a distinct
-        # section from the white body underneath it.
-        ctk.CTkFrame(self.root, fg_color=BORDER, height=1, corner_radius=0).pack(fill="x")
-
-    def _render_logo(self, parent):
-        """Show a real logo if assets/logo.* exists, otherwise a clean
-        rounded placeholder mark so the app still looks finished today."""
-        if self._logo_image is not None:
-            ctk.CTkLabel(parent, image=self._logo_image, text="", fg_color=BANNER_BG).pack()
-            return
-
-        ctk.CTkLabel(
-            parent,
-            text=APP_NAME[0],
-            width=LOGO_SIZE,
-            height=LOGO_SIZE,
-            corner_radius=LOGO_SIZE // 2,
-            fg_color=ACCENT,
-            text_color="white",
-            font=(FONT_FAMILY, int(LOGO_SIZE * 0.4), "bold"),
-        ).pack()
-
-    # ------------------------------------------------------------- body --
-    def _build_body(self):
-        """Builds two swappable views inside `body`: the home page
-        (search + waffle grid) and the in-app document viewer. Only one
-        is shown at a time; the toolbar at the bottom is always visible."""
-        body = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
-        body.pack(fill="both", expand=True, padx=28, pady=(20, 22))
-
-        self.home_frame = ctk.CTkFrame(body, fg_color=BODY_BG, corner_radius=0)
-        self.viewer_frame = ctk.CTkFrame(body, fg_color=BODY_BG, corner_radius=0)
-        self._build_home(self.home_frame)
-        self.home_frame.pack(fill="both", expand=True)
-
-        self._build_toolbar(body)
-
-    def _build_home(self, parent):
-        ctk.CTkLabel(
-            parent,
-            text="Office Guides & Documents",
-            font=(FONT_FAMILY, 13, "bold"),
-            text_color=TEXT_DARK,
-            fg_color=BODY_BG,
+            header_inner, text=APP_TAGLINE, font=(FONT_FAMILY, 10), text_color=ACCENT, fg_color=BODY_BG
         ).pack(anchor="w")
-        ctk.CTkLabel(
-            parent,
-            text="Pick a tile below to open a guide right here in the app.",
-            font=(FONT_FAMILY, 11),
-            text_color=TEXT_MUTED,
-            fg_color=BODY_BG,
-        ).pack(anchor="w", pady=(2, 14))
 
-        search_row = ctk.CTkFrame(parent, fg_color=BODY_BG)
-        search_row.pack(fill="x", pady=(0, 14))
+        ctk.CTkFrame(sidebar, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
 
+        search_row = ctk.CTkFrame(sidebar, fg_color=SIDEBAR_BG)
+        search_row.pack(fill="x", padx=12, pady=12)
         self.search_var = StringVar()
         self.search_var.trace_add("write", lambda *_: self._apply_filter())
         ctk.CTkEntry(
             search_row,
             textvariable=self.search_var,
-            placeholder_text="Search documents…",
+            placeholder_text="Search…",
             font=(FONT_FAMILY, 12),
-            height=36,
+            height=32,
             corner_radius=8,
-            border_color=BORDER,
+            fg_color=SIDEBAR_HOVER,
+            border_color=SIDEBAR_DIVIDER,
+            text_color=SIDEBAR_TEXT,
+            placeholder_text_color=SIDEBAR_TEXT_MUTED,
         ).pack(fill="x")
 
-        self.grid_scroll = ctk.CTkScrollableFrame(parent, fg_color=BODY_BG, corner_radius=0)
-        self.grid_scroll.pack(fill="both", expand=True)
-        for col in range(GRID_COLUMNS):
-            self.grid_scroll.grid_columnconfigure(col, weight=1)
+        self.nav_scroll = ctk.CTkScrollableFrame(sidebar, fg_color=SIDEBAR_BG, corner_radius=0)
+        self.nav_scroll.pack(fill="both", expand=True, padx=6)
 
-        self.empty_label = ctk.CTkLabel(
-            self.grid_scroll,
-            text="No documents found yet.",
-            font=(FONT_FAMILY, 11),
-            text_color=TEXT_MUTED,
-            fg_color=BODY_BG,
-            justify="left",
-        )
+        self._build_sidebar_footer(sidebar)
 
-    def _build_tile(self, parent, index, title, path, is_program):
-        """One waffle tile: a colored icon badge (alternating navy/cyan,
-        the brand colors) with the document's first letter, and its
-        title underneath. Interactive "programs" get a small hint that
-        they'll open in the browser instead of the in-app viewer."""
-        badge_bg = TEXT_DARK if index % 2 == 0 else ACCENT  # navy / cyan, alternating
+    def _build_sidebar_footer(self, sidebar):
+        ctk.CTkFrame(sidebar, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
+        footer = ctk.CTkFrame(sidebar, fg_color=SIDEBAR_BG)
+        footer.pack(fill="x", padx=8, pady=8)
 
-        tile = ctk.CTkFrame(
-            parent,
-            fg_color=CARD_BG,
-            border_width=1,
-            border_color=BORDER,
-            corner_radius=14,
-            width=TILE_WIDTH,
-            height=TILE_HEIGHT,
-        )
-        tile.pack_propagate(False)
-
-        icon = ctk.CTkLabel(
-            tile,
-            text=(title[:1] or "?").upper(),
-            width=TILE_ICON_SIZE,
-            height=TILE_ICON_SIZE,
-            corner_radius=12,
-            fg_color=badge_bg,
-            text_color="white",
-            font=(FONT_FAMILY, int(TILE_ICON_SIZE * 0.42), "bold"),
-        )
-        icon.pack(pady=(16, 6))
-
-        label = ctk.CTkLabel(
-            tile,
-            text=title,
-            font=(FONT_FAMILY, 12, "bold"),
-            text_color=TEXT_DARK,
-            fg_color="transparent",
-            wraplength=TILE_WIDTH - 20,
-            justify="center",
-        )
-        label.pack(padx=10)
-
-        clickable = [tile, icon, label]
-
-        if is_program:
-            hint_text = "Opens in a tool window ↗" if webview is not None else "Opens in browser ↗"
-            hint = ctk.CTkLabel(
-                tile,
-                text=hint_text,
-                font=(FONT_FAMILY, 9),
-                text_color=TEXT_MUTED,
-                fg_color="transparent",
-            )
-            hint.pack(pady=(4, 0))
-            clickable.append(hint)
-
-        def on_click(_event=None):
-            self.open_document(path, is_program=is_program, title=title)
-
-        def on_enter(_event=None):
-            tile.configure(fg_color=ACCENT_SOFT)
-
-        def on_leave(_event=None):
-            tile.configure(fg_color=CARD_BG)
-
-        for widget in clickable:
-            widget.bind("<Button-1>", on_click)
-            widget.bind("<Enter>", on_enter)
-            widget.bind("<Leave>", on_leave)
-            widget.configure(cursor="pointinghand" if sys.platform == "darwin" else "hand2")
-
-        return tile
-
-    def _build_toolbar(self, body):
-        toolbar = ctk.CTkFrame(body, fg_color=BODY_BG)
-        toolbar.pack(fill="x", pady=(16, 0))
-
-        def ghost_button(text, command):
+        def footer_button(text, command):
             return ctk.CTkButton(
-                toolbar,
+                footer,
                 text=text,
+                anchor="w",
                 font=(FONT_FAMILY, 11),
                 fg_color="transparent",
-                hover_color=ACCENT_SOFT,
-                text_color=TEXT_DARK,
-                border_width=1,
-                border_color=BORDER,
+                hover_color=SIDEBAR_HOVER,
+                text_color=SIDEBAR_TEXT_MUTED,
                 corner_radius=8,
-                height=34,
+                height=30,
                 command=command,
             )
 
-        ghost_button("Refresh", self.refresh_documents).pack(side="left")
-        ghost_button("How to Use This Launcher", self.show_help).pack(side="left", padx=(8, 0))
-        ghost_button("Quit", self.root.destroy).pack(side="right")
+        footer_button("Refresh", self.refresh_documents).pack(fill="x", pady=1)
+        footer_button("How to Use This Launcher", self.show_help).pack(fill="x", pady=1)
+        footer_button("Quit", self.root.destroy).pack(fill="x", pady=1)
+
+    def _render_logo(self, parent, logo_image, placeholder_size):
+        """Show a real logo if assets/logo.* exists, otherwise a clean
+        rounded placeholder mark so the app still looks finished today.
+        Always drawn on a white background — see load_logo_image."""
+        if logo_image is not None:
+            ctk.CTkLabel(parent, image=logo_image, text="", fg_color=BODY_BG).pack(anchor="w")
+            return
+
+        ctk.CTkLabel(
+            parent,
+            text=APP_NAME[0],
+            width=placeholder_size,
+            height=placeholder_size,
+            corner_radius=placeholder_size // 2,
+            fg_color=ACCENT,
+            text_color="white",
+            font=(FONT_FAMILY, int(placeholder_size * 0.4), "bold"),
+        ).pack(anchor="w")
 
     # --------------------------------------------------------- behavior --
     def refresh_documents(self):
+        had_selection = self._selected_path is not None
         self.documents = discover_documents()
         self._apply_filter()
+
+        if not had_selection:
+            for _key, title, path, is_program in self.filtered:
+                if not is_program:
+                    self._select_document(path, title, is_program)
+                    break
 
     def _apply_filter(self):
         query = self.search_var.get().strip().lower()
         self.filtered = [d for d in self.documents if query in d[1].lower()] if query else list(self.documents)
 
-        for widget in self.grid_scroll.winfo_children():
+        for widget in self.nav_scroll.winfo_children():
             widget.destroy()
+        self._nav_buttons = {}
 
         if not self.filtered:
             message = (
@@ -469,41 +376,57 @@ class LauncherApp:
                 if query
                 else f"No documents found yet.\nAdd .html files to:\n{HTML_DIR}"
             )
-            self.empty_label = ctk.CTkLabel(
-                self.grid_scroll,
+            ctk.CTkLabel(
+                self.nav_scroll,
                 text=message,
                 font=(FONT_FAMILY, 11),
-                text_color=TEXT_MUTED,
-                fg_color=BODY_BG,
+                text_color=SIDEBAR_TEXT_MUTED,
+                fg_color=SIDEBAR_BG,
                 justify="left",
-            )
-            self.empty_label.grid(row=0, column=0, columnspan=GRID_COLUMNS, sticky="w", padx=8, pady=12)
+                wraplength=SIDEBAR_WIDTH - 40,
+            ).pack(anchor="w", padx=6, pady=12)
             return
 
-        for index, (_key, title, path, is_program) in enumerate(self.filtered):
-            row, col = divmod(index, GRID_COLUMNS)
-            tile = self._build_tile(self.grid_scroll, index, title, path, is_program)
-            tile.grid(row=row, column=col, padx=10, pady=10, sticky="n")
+        for _key, title, path, is_program in self.filtered:
+            label = f"{title}  ↗" if is_program else title
+            btn = ctk.CTkButton(
+                self.nav_scroll,
+                text=label,
+                anchor="w",
+                font=(FONT_FAMILY, 12),
+                fg_color=SIDEBAR_BG,
+                hover_color=SIDEBAR_HOVER,
+                text_color=SIDEBAR_TEXT,
+                corner_radius=8,
+                height=36,
+                command=lambda p=path, t=title, prog=is_program: self._select_document(p, t, prog),
+            )
+            btn.pack(fill="x", pady=2)
+            self._nav_buttons[path] = btn
 
-    def open_document(self, path: Path, is_program: bool = False, title: str = ""):
-        """Entry point from a tile click.
+        if self._selected_path in self._nav_buttons:
+            self._highlight_nav(self._selected_path)
 
-        - Interactive programs open in their own pywebview window (a real
-          web engine — full JavaScript, file uploads, downloads), or the
-          system browser if pywebview isn't installed.
-        - Everything else opens in the in-app viewer, or the system
-          browser if tkinterweb isn't installed.
-        """
+    def _highlight_nav(self, active_path):
+        for path, btn in self._nav_buttons.items():
+            if path == active_path:
+                btn.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
+            else:
+                btn.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
+
+    def _select_document(self, path: Path, title: str, is_program: bool):
         if not path.exists():
             messagebox.showerror(WINDOW_TITLE, f"File not found:\n{path}\n\nClick Refresh and try again.")
             return
+        self._selected_path = path
+        self._highlight_nav(path)
         if is_program:
-            self._open_program(path, title)
-            return
-        if HtmlFrame is None:
+            self._show_program_card(title, path)
+        elif HtmlFrame is None:
             webbrowser.open(path.resolve().as_uri())
-            return
-        self._show_viewer(title, path)
+            self._show_browser_fallback_card(title, path)
+        else:
+            self._show_guide(title, path)
 
     def _open_program(self, path: Path, title: str):
         """Launch an interactive tool in its own pywebview window, spawned
@@ -527,58 +450,85 @@ class LauncherApp:
                 pass
         webbrowser.open(path.resolve().as_uri())
 
-    # ------------------------------------------------------------ viewer --
-    def _show_viewer(self, title: str, path: Path):
-        self.home_frame.pack_forget()
-
-        for widget in self.viewer_frame.winfo_children():
+    # ---------------------------------------------------- content pane --
+    def _clear_content(self):
+        for widget in self.content_frame.winfo_children():
             widget.destroy()
 
-        top_row = ctk.CTkFrame(self.viewer_frame, fg_color=BODY_BG)
-        top_row.pack(fill="x", pady=(0, 12))
+    def _content_header(self, title: str, extra_button=None):
+        """Shared header row (icon + title, optional right-side button)
+        used at the top of every non-welcome content view."""
+        header = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG)
+        header.pack(fill="x", padx=24, pady=(20, 12))
 
-        ctk.CTkButton(
-            top_row,
-            text="← Back to Home",
-            font=(FONT_FAMILY, 11),
-            fg_color="transparent",
-            hover_color=ACCENT_SOFT,
-            text_color=TEXT_DARK,
-            border_width=1,
-            border_color=BORDER,
-            corner_radius=8,
-            height=32,
-            width=130,
-            command=self._show_home,
+        ctk.CTkLabel(
+            header,
+            text=(title[:1] or "?").upper(),
+            width=34,
+            height=34,
+            corner_radius=10,
+            fg_color=TEXT_DARK,
+            text_color="white",
+            font=(FONT_FAMILY, 15, "bold"),
         ).pack(side="left")
 
         ctk.CTkLabel(
-            top_row,
+            header,
             text=title,
-            font=(FONT_FAMILY, 15, "bold"),
+            font=(FONT_FAMILY, 16, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
             wraplength=420,
             justify="left",
-        ).pack(side="left", padx=(14, 0))
+        ).pack(side="left", padx=(12, 0))
 
-        ctk.CTkButton(
-            top_row,
-            text="Open in Browser ↗",
-            font=(FONT_FAMILY, 11),
-            fg_color="transparent",
-            hover_color=ACCENT_SOFT,
-            text_color=ACCENT,
-            border_width=0,
-            corner_radius=8,
-            height=32,
-            command=lambda: webbrowser.open(path.resolve().as_uri()),
-        ).pack(side="right")
+        if extra_button is not None:
+            text, command = extra_button
+            ctk.CTkButton(
+                header,
+                text=text,
+                font=(FONT_FAMILY, 11),
+                fg_color="transparent",
+                hover_color=ACCENT_SOFT,
+                text_color=ACCENT,
+                border_width=0,
+                corner_radius=8,
+                height=32,
+                command=command,
+            ).pack(side="right")
+
+    def _show_welcome(self):
+        self._clear_content()
+        wrap = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG)
+        wrap.place(relx=0.5, rely=0.42, anchor="center")
+
+        logo_holder = ctk.CTkFrame(wrap, fg_color=BODY_BG)
+        logo_holder.pack(pady=(0, 16))
+        self._render_logo(logo_holder, self._welcome_logo, 72)
+
+        ctk.CTkLabel(
+            wrap,
+            text=f"Welcome to {APP_NAME}",
+            font=(FONT_FAMILY, 18, "bold"),
+            text_color=TEXT_DARK,
+            fg_color=BODY_BG,
+        ).pack()
+        ctk.CTkLabel(
+            wrap,
+            text="Choose a guide from the left to get started.",
+            font=(FONT_FAMILY, 12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+        ).pack(pady=(4, 0))
+
+    def _show_guide(self, title: str, path: Path):
+        self._clear_content()
+        self._content_header(title, extra_button=("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri())))
 
         viewer_card = ctk.CTkFrame(
-            self.viewer_frame, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER
+            self.content_frame, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER
         )
-        viewer_card.pack(fill="both", expand=True)
+        viewer_card.pack(fill="both", expand=True, padx=24, pady=(0, 20))
 
         try:
             html_view = HtmlFrame(viewer_card, messages_enabled=False)
@@ -594,24 +544,79 @@ class LauncherApp:
                 justify="center",
             ).pack(expand=True)
 
-        self.viewer_frame.pack(fill="both", expand=True)
+    def _show_browser_fallback_card(self, title: str, path: Path):
+        """Used when tkinterweb isn't installed at all — the document has
+        already been opened in the browser; this just confirms that in
+        the content pane instead of leaving it blank."""
+        self._clear_content()
+        self._content_header(title)
+        wrap = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG)
+        wrap.place(relx=0.5, rely=0.42, anchor="center")
+        ctk.CTkLabel(
+            wrap,
+            text="Opened in your default browser.",
+            font=(FONT_FAMILY, 12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+        ).pack()
+        ctk.CTkButton(
+            wrap,
+            text="Open Again",
+            font=(FONT_FAMILY, 12, "bold"),
+            fg_color=ACCENT,
+            hover_color=TEXT_DARK,
+            text_color="white",
+            corner_radius=10,
+            height=38,
+            command=lambda: webbrowser.open(path.resolve().as_uri()),
+        ).pack(pady=(12, 0))
 
-    def _show_home(self):
-        self.viewer_frame.pack_forget()
-        self.home_frame.pack(fill="both", expand=True)
+    def _show_program_card(self, title: str, path: Path):
+        self._clear_content()
+        self._content_header(title)
+
+        wrap = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG)
+        wrap.place(relx=0.5, rely=0.42, anchor="center")
+
+        ctk.CTkLabel(
+            wrap,
+            text=title,
+            font=(FONT_FAMILY, 16, "bold"),
+            text_color=TEXT_DARK,
+            fg_color=BODY_BG,
+        ).pack()
+        button_word = "tool window" if webview is not None else "your browser"
+        ctk.CTkLabel(
+            wrap,
+            text=f"This is an interactive tool that needs a real browser\nengine to run — it opens in its own {button_word}.",
+            font=(FONT_FAMILY, 12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+            justify="center",
+        ).pack(pady=(6, 16))
+        ctk.CTkButton(
+            wrap,
+            text="Open Tool" if webview is not None else "Open in Browser",
+            font=(FONT_FAMILY, 13, "bold"),
+            fg_color=ACCENT,
+            hover_color=TEXT_DARK,
+            text_color="white",
+            corner_radius=10,
+            height=40,
+            width=160,
+            command=lambda: self._open_program(path, title),
+        ).pack()
 
     def show_help(self):
         messagebox.showinfo(
             "How to Use This Launcher",
-            "1. Click any tile to open that guide right here in the app.\n"
-            "2. Tiles marked \"Opens in a tool window\" (or \"Opens in "
-            "browser\") are interactive tools that need real JavaScript to "
-            "run — clicking them opens a separate window for that tool "
-            "instead of the in-app viewer.\n"
-            "3. Use \"← Back to Home\" (top left of a document) to return to "
-            "the tile grid.\n"
-            "4. Use Search to quickly find a tile by name.\n"
-            "5. If you don't see a document you expect, ask an admin to add it "
+            "1. Click any item in the sidebar to open it right here in the app.\n"
+            "2. Items marked with ↗ are interactive tools that need real "
+            "JavaScript to run — they show an \"Open Tool\" button that opens "
+            "a separate window for that tool.\n"
+            "3. Use Search at the top of the sidebar to quickly find an item "
+            "by name.\n"
+            "4. If you don't see a document you expect, ask an admin to add it "
             "to the html folder, then click Refresh.\n\n"
             "Having trouble? Contact your office administrator.",
         )

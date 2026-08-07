@@ -1,13 +1,14 @@
 # The Center — Office Tools
 
-A small desktop app for new office members. The home page shows a grid of
-tiles (a "waffle") — one per HTML guide in the `html/` folder — and clicking
-a tile opens it right inside the app:
+A small desktop app for new office members. A sidebar on the left lists
+every HTML guide in the `html/` folder; clicking one shows it in the main
+pane on the right, right inside the app:
 
 - Plain guides open in a lightweight built-in viewer
   ([tkinterweb](https://github.com/Andereoo/TkinterWeb)).
 - Interactive HTML tools (anything with real JavaScript, like a calculator
-  or reconciliation tool) open in their own native window powered by
+  or reconciliation tool) show an "Open Tool" card instead. Clicking it
+  opens the tool in its own native window powered by
   [pywebview](https://pywebview.flowrl.com/), which uses the OS's real web
   engine (WebKit on Mac, WebView2 on Windows) — full JavaScript, file
   uploads, and downloads all work. The launcher window stays open the
@@ -18,8 +19,9 @@ a tile opens it right inside the app:
 Built with [CustomTkinter](https://customtkinter.tomschimansky.com/) for
 the interface.
 
-The window opens with a white banner showing the real logo, the "The
-Center" wordmark in navy, and an "Office Tools" tagline in cyan underneath.
+The sidebar is navy with a white header showing the real logo, the "The
+Center" wordmark, and an "Office Tools" tagline in cyan. The main pane is
+white; the currently open item is highlighted in the sidebar.
 
 ## Download and run (easiest way — no setup required)
 
@@ -101,7 +103,8 @@ To remove a document, delete its file from `html/`.
 
 ## Adding or replacing the logo
 
-The banner shows the real Center logo from `assets/logo.png`. To replace it:
+The sidebar header and welcome screen show the real Center logo from
+`assets/logo.png`. To replace it:
 
 1. Save an image (PNG or JPG, transparent background recommended) as
    `assets/logo.png` (or `logo.jpg`). It doesn't need to be square — it's
@@ -237,11 +240,10 @@ icon all work normally.
 This is also built into the app via the **"How to Use This Launcher"**
 button, so new hires can self-serve:
 
-1. Click any tile on the home page to open it right in the app.
-2. Tiles marked **"Opens in a tool window"** are interactive tools that need
-   real JavaScript to run — clicking them opens a separate window for that
-   tool (or your default browser, if pywebview isn't installed).
-3. Use **← Back to Home** (top left of a document) to return to the tiles.
-4. Use **Search** to filter the tiles by name.
-5. If an expected document is missing, ask an admin to add it to `html/`,
-   then click **Refresh**.
+1. Click any item in the sidebar to open it in the main pane.
+2. Items marked with **↗** are interactive tools that need real JavaScript
+   to run — they show an **Open Tool** button (or **Open in Browser**, if
+   pywebview isn't installed) instead of rendering in the built-in viewer.
+3. Use **Search** at the top of the sidebar to filter the list by name.
+4. If an expected document is missing, ask an admin to add it to `html/`,
+   then click **Refresh** at the bottom of the sidebar.
