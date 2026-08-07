@@ -132,6 +132,12 @@ LOGO_HEIGHT = 40  # px tall in the sidebar header — real logo.png is drawn
                   # at this height, with width scaled to its aspect ratio
 WELCOME_LOGO_HEIGHT = 72  # px tall on the welcome screen (bigger, roomier)
 
+# Guides that duplicate content already covered by a pinned sidebar page
+# (Home covers the welcome/onboarding content) — kept as real files so
+# they still exist and can be opened directly, just not listed a second
+# time in the general document list.
+SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
+
 
 def get_base_dir() -> Path:
     """Folder used to find html/ and assets/ — kept separate from any
@@ -431,8 +437,18 @@ class LauncherApp:
             self._show_apps()
 
     def _apply_filter(self):
+        # Interactive tools have their own dedicated "Apps" page, and some
+        # guides (currently just the welcome guide) are superseded by the
+        # pinned "Home" page — both are left out of this general list so
+        # they aren't shown twice, though the files themselves still exist
+        # and Apps still pulls tools straight from self.documents.
+        nav_docs = [
+            d for d in self.documents
+            if not d[3] and d[2].name.lower() not in SIDEBAR_HIDDEN_FILES
+        ]
+
         query = self.search_var.get().strip().lower()
-        self.filtered = [d for d in self.documents if query in d[1].lower()] if query else list(self.documents)
+        self.filtered = [d for d in nav_docs if query in d[1].lower()] if query else nav_docs
 
         for widget in self.nav_scroll.winfo_children():
             widget.destroy()
