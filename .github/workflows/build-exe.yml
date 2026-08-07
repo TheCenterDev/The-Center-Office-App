@@ -35,7 +35,7 @@ jobs:
         run: pip install pyinstaller customtkinter tkinterweb pywebview
 
       - name: Build executable
-        run: pyinstaller --onefile --windowed --icon=assets/icon.ico --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
+        run: pyinstaller launcher.spec --noconfirm
 
       - name: Assemble release folder (exe + html + assets)
         shell: cmd
@@ -70,7 +70,7 @@ jobs:
         run: pip install pyinstaller customtkinter tkinterweb pywebview
 
       - name: Build app
-        run: pyinstaller --windowed --icon=assets/icon.icns --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
+        run: pyinstaller launcher.spec --noconfirm
 
       - name: Assemble release folder (app + html + assets)
         run: |

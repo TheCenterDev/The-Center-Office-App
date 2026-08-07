@@ -166,31 +166,33 @@ that colleagues can double-click without installing Python.
 pip install pyinstaller customtkinter tkinterweb pywebview
 ```
 
-**Windows** — produces `dist/TheCenterOfficeLauncher.exe`:
+Both Windows and Mac now build from the same `launcher.spec` file (it
+branches on the OS internally), so the command is identical on either
+platform:
 
 ```
-pyinstaller --onefile --windowed --icon=assets/icon.ico --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
+pyinstaller launcher.spec --noconfirm
 ```
 
-**Mac** — produces `dist/TheCenterOfficeLauncher.app`:
+This produces `dist/TheCenterOfficeLauncher.exe` on Windows and
+`dist/TheCenterOfficeLauncher.app` on Mac.
 
-```
-pyinstaller --windowed --icon=assets/icon.icns --collect-all customtkinter --collect-all tkinterweb --collect-all tkinterweb_tkhtml --name "TheCenterOfficeLauncher" launcher.py
-```
-
-The `--collect-all customtkinter` flag is required — CustomTkinter ships
-its own theme and font files that PyInstaller won't find automatically.
-Likewise, `--collect-all tkinterweb --collect-all tkinterweb_tkhtml` is
-required for the in-app document viewer — tkinterweb ships a compiled
-Tkhtml engine per platform that PyInstaller won't find automatically.
-`pywebview` doesn't need a `--collect-all` flag — it ships its own
-PyInstaller hook that's picked up automatically. Any of these three can be
-missing without the app crashing: guides and tools just fall back to
-opening in the browser instead of rendering in-app / their own window.
-
-`--icon=assets/icon.ico` / `--icon=assets/icon.icns` set the app's Dock,
-Finder, Launchpad, and taskbar icon to the real logo (see "The app icon"
-above) — leave these off if you'd rather use PyInstaller's generic default.
+Why a `.spec` file instead of a plain `pyinstaller launcher.py ...`
+command with flags: PyInstaller's CLI has no flag for setting custom
+`Info.plist` keys, and this app needs one — `NSHighResolutionCapable` —
+so macOS renders it at full Retina resolution. Without it, macOS silently
+upscales the whole app (the Tkinter UI, the tkinterweb guide viewer, and
+the pywebview tool windows, since they're all part of the same process)
+into a blurry, low-resolution image. `launcher.spec` also handles what
+the old flags used to do — `--collect-all customtkinter`/`tkinterweb`/
+`tkinterweb_tkhtml` (needed because those packages ship theme, font, and
+compiled-engine files PyInstaller won't find automatically; `pywebview`
+ships its own PyInstaller hook and doesn't need this) and `--icon=` to
+set the Dock/Finder/Launchpad/taskbar icon to the real logo — so all of
+that configuration now lives in one place and stays in sync between local
+builds and CI. Any of the three collected packages can be missing without
+the app crashing: guides and tools just fall back to opening in the
+browser instead of rendering in-app / their own window.
 
 ### Important: keep the html/ folder next to the built app
 
