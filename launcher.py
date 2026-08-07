@@ -3,10 +3,11 @@
 The Center — Office Tools
 ==========================
 
-A simple desktop app for new office members. A sidebar on the left
-lists the HTML guides kept in the `html/` folder next to this
-program; clicking one shows it in the main pane on the right, right
-inside the app:
+A simple desktop app for new office members. It opens to a Home page
+explaining what the app is for. A sidebar on the left (collapsible via
+the ⟨/⟩ arrow at its top) lists the HTML guides kept in the `html/`
+folder next to this program; clicking one shows it in the main pane
+on the right, right inside the app:
 
 - Plain guides open in a lightweight built-in viewer (tkinterweb).
 - Interactive HTML "programs" (anything with real JavaScript logic,
@@ -117,6 +118,7 @@ SIDEBAR_DIVIDER = "#33377a"
 SIDEBAR_TEXT = "#ffffff"
 SIDEBAR_TEXT_MUTED = "#9fd6f0"
 SIDEBAR_WIDTH = 220
+SIDEBAR_COLLAPSED_WIDTH = 40
 
 FONT_FAMILY = "Segoe UI"
 
@@ -238,7 +240,9 @@ class LauncherApp:
         self.documents = []  # list of (sort_key, title, path, is_program)
         self.filtered = []
         self._nav_buttons = {}  # path -> CTkButton, for highlighting the active row
-        self._selected_path = None
+        self._selected_path = None  # None means the Home page is active
+        self._sidebar_expanded = True
+        self.home_button = None
         self._sidebar_logo = load_logo_image(LOGO_HEIGHT)
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
 
@@ -262,17 +266,40 @@ class LauncherApp:
 
         self.content_frame = ctk.CTkFrame(container, fg_color=BODY_BG, corner_radius=0)
         self.content_frame.pack(side="left", fill="both", expand=True)
-        self._show_welcome()
+        self._show_home()
 
     # ---------------------------------------------------------- sidebar --
     def _build_sidebar(self, parent):
-        sidebar = ctk.CTkFrame(parent, fg_color=SIDEBAR_BG, corner_radius=0, width=SIDEBAR_WIDTH)
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
+        self.sidebar = ctk.CTkFrame(parent, fg_color=SIDEBAR_BG, corner_radius=0, width=SIDEBAR_WIDTH)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+
+        # A collapse/expand toggle sits at the very top and is always
+        # visible, whichever state the sidebar is in.
+        toggle_row = ctk.CTkFrame(self.sidebar, fg_color=SIDEBAR_BG)
+        toggle_row.pack(fill="x")
+        self.toggle_button = ctk.CTkButton(
+            toggle_row,
+            text="⟨",
+            width=26,
+            height=26,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color=SIDEBAR_HOVER,
+            text_color=SIDEBAR_TEXT_MUTED,
+            font=(FONT_FAMILY, 12, "bold"),
+            command=self._toggle_sidebar,
+        )
+        self.toggle_button.pack(anchor="e", padx=6, pady=6)
+
+        # Everything else lives in one sub-frame so it can be hidden as a
+        # unit when the sidebar collapses to a thin strip.
+        self.sidebar_content = ctk.CTkFrame(self.sidebar, fg_color=SIDEBAR_BG, corner_radius=0)
+        self.sidebar_content.pack(fill="both", expand=True)
 
         # Header stays white so the real (navy-and-cyan) logo is readable
         # — it would disappear if drawn directly on the navy sidebar.
-        header = ctk.CTkFrame(sidebar, fg_color=BODY_BG, corner_radius=0)
+        header = ctk.CTkFrame(self.sidebar_content, fg_color=BODY_BG, corner_radius=0)
         header.pack(fill="x")
         header_inner = ctk.CTkFrame(header, fg_color=BODY_BG)
         header_inner.pack(padx=18, pady=18)
@@ -284,9 +311,29 @@ class LauncherApp:
             header_inner, text=APP_TAGLINE, font=(FONT_FAMILY, 10), text_color=ACCENT, fg_color=BODY_BG
         ).pack(anchor="w")
 
-        ctk.CTkFrame(sidebar, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
+        ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
 
-        search_row = ctk.CTkFrame(sidebar, fg_color=SIDEBAR_BG)
+        home_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
+        home_row.pack(fill="x", padx=6, pady=(10, 4))
+        self.home_button = ctk.CTkButton(
+            home_row,
+            text="Home",
+            anchor="w",
+            font=(FONT_FAMILY, 12, "bold"),
+            fg_color=SIDEBAR_BG,
+            hover_color=SIDEBAR_HOVER,
+            text_color=SIDEBAR_TEXT,
+            corner_radius=8,
+            height=36,
+            command=self._show_home,
+        )
+        self.home_button.pack(fill="x")
+
+        ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(
+            fill="x", padx=6, pady=(6, 0)
+        )
+
+        search_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
         search_row.pack(fill="x", padx=12, pady=12)
         self.search_var = StringVar()
         self.search_var.trace_add("write", lambda *_: self._apply_filter())
@@ -303,10 +350,21 @@ class LauncherApp:
             placeholder_text_color=SIDEBAR_TEXT_MUTED,
         ).pack(fill="x")
 
-        self.nav_scroll = ctk.CTkScrollableFrame(sidebar, fg_color=SIDEBAR_BG, corner_radius=0)
+        self.nav_scroll = ctk.CTkScrollableFrame(self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0)
         self.nav_scroll.pack(fill="both", expand=True, padx=6)
 
-        self._build_sidebar_footer(sidebar)
+        self._build_sidebar_footer(self.sidebar_content)
+
+    def _toggle_sidebar(self):
+        self._sidebar_expanded = not self._sidebar_expanded
+        if self._sidebar_expanded:
+            self.sidebar.configure(width=SIDEBAR_WIDTH)
+            self.sidebar_content.pack(fill="both", expand=True)
+            self.toggle_button.configure(text="⟨")
+        else:
+            self.sidebar_content.pack_forget()
+            self.sidebar.configure(width=SIDEBAR_COLLAPSED_WIDTH)
+            self.toggle_button.configure(text="⟩")
 
     def _build_sidebar_footer(self, sidebar):
         ctk.CTkFrame(sidebar, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
@@ -352,15 +410,8 @@ class LauncherApp:
 
     # --------------------------------------------------------- behavior --
     def refresh_documents(self):
-        had_selection = self._selected_path is not None
         self.documents = discover_documents()
         self._apply_filter()
-
-        if not had_selection:
-            for _key, title, path, is_program in self.filtered:
-                if not is_program:
-                    self._select_document(path, title, is_program)
-                    break
 
     def _apply_filter(self):
         query = self.search_var.get().strip().lower()
@@ -404,10 +455,14 @@ class LauncherApp:
             btn.pack(fill="x", pady=2)
             self._nav_buttons[path] = btn
 
-        if self._selected_path in self._nav_buttons:
-            self._highlight_nav(self._selected_path)
+        self._highlight_nav(self._selected_path)
 
     def _highlight_nav(self, active_path):
+        if self.home_button is not None:
+            if active_path is None:
+                self.home_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
+            else:
+                self.home_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
         for path, btn in self._nav_buttons.items():
             if path == active_path:
                 btn.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
@@ -497,29 +552,84 @@ class LauncherApp:
                 command=command,
             ).pack(side="right")
 
-    def _show_welcome(self):
+    def _show_home(self):
+        """The initial page and the sidebar's pinned 'Home' entry — an
+        overview of what this app is for, aimed at someone brand new to
+        the office."""
+        self._selected_path = None
         self._clear_content()
-        wrap = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG)
-        wrap.place(relx=0.5, rely=0.42, anchor="center")
+        self._highlight_nav(None)
 
-        logo_holder = ctk.CTkFrame(wrap, fg_color=BODY_BG)
-        logo_holder.pack(pady=(0, 16))
-        self._render_logo(logo_holder, self._welcome_logo, 72)
+        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll.pack(fill="both", expand=True, padx=32, pady=28)
+
+        logo_holder = ctk.CTkFrame(scroll, fg_color=BODY_BG)
+        logo_holder.pack(anchor="w", pady=(0, 16))
+        self._render_logo(logo_holder, self._welcome_logo, 64)
 
         ctk.CTkLabel(
-            wrap,
-            text=f"Welcome to {APP_NAME}",
-            font=(FONT_FAMILY, 18, "bold"),
+            scroll,
+            text="Welcome to The Center Office Application",
+            font=(FONT_FAMILY, 19, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
-        ).pack()
-        ctk.CTkLabel(
-            wrap,
-            text="Choose a guide from the left to get started.",
-            font=(FONT_FAMILY, 12),
-            text_color=TEXT_MUTED,
-            fg_color=BODY_BG,
-        ).pack(pady=(4, 0))
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 16))
+
+        def section(heading: str, body: str):
+            ctk.CTkLabel(
+                scroll,
+                text=heading,
+                font=(FONT_FAMILY, 13, "bold"),
+                text_color=TEXT_DARK,
+                fg_color=BODY_BG,
+            ).pack(anchor="w", pady=(14, 4))
+            ctk.CTkLabel(
+                scroll,
+                text=body,
+                font=(FONT_FAMILY, 12),
+                text_color=TEXT_MUTED,
+                fg_color=BODY_BG,
+                wraplength=560,
+                justify="left",
+            ).pack(anchor="w")
+
+        section(
+            "What this app is for",
+            "This app is home base for the resources that automate day-to-day "
+            "office work at The Center. Instead of digging through email "
+            "threads or asking around, everything you need — reference "
+            "guides and small tools that do part of the work for you — "
+            "lives in the sidebar on the left.",
+        )
+        section(
+            "Using the guides and tools",
+            "Click any item in the sidebar to open it. Plain guides (like "
+            "this one) display right here in the main pane. Items marked "
+            "with ↗ are interactive HTML tools — they need a real browser "
+            "to run, so they open an \"Open Tool\" card with a button that "
+            "launches them in their own window, without closing this app.",
+        )
+        section(
+            "Using Claude Skills",
+            "Some repetitive office work is automated with Claude Skills — "
+            "reusable instructions Claude can follow for a specific task, "
+            "such as reconciling a bank deposit against QuickBooks or "
+            "drafting the monthly budget-vs-actual financial summary email. "
+            "You don't run these from this app — just describe what you "
+            "need to Claude in plain language (for example, \"reconcile "
+            "this deposit\" or \"draft the financials email\") and it runs "
+            "the right skill automatically.",
+        )
+        section(
+            "Getting started",
+            "New to the office? Start with the Welcome guide in the "
+            "sidebar, then browse the rest as you need them. Use Search to "
+            "find something quickly, or the ⟨ arrow at the top of the "
+            "sidebar to collapse it out of the way. Questions? Contact your "
+            "office administrator.",
+        )
 
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
@@ -610,13 +720,16 @@ class LauncherApp:
     def show_help(self):
         messagebox.showinfo(
             "How to Use This Launcher",
-            "1. Click any item in the sidebar to open it right here in the app.\n"
-            "2. Items marked with ↗ are interactive tools that need real "
+            "1. Click Home (top of the sidebar) any time to return to the "
+            "welcome overview.\n"
+            "2. Click any other item in the sidebar to open it right here "
+            "in the app.\n"
+            "3. Items marked with ↗ are interactive tools that need real "
             "JavaScript to run — they show an \"Open Tool\" button that opens "
             "a separate window for that tool.\n"
-            "3. Use Search at the top of the sidebar to quickly find an item "
-            "by name.\n"
-            "4. If you don't see a document you expect, ask an admin to add it "
+            "4. Use Search to quickly find an item by name, or the ⟨ arrow "
+            "at the top of the sidebar to collapse it out of the way.\n"
+            "5. If you don't see a document you expect, ask an admin to add it "
             "to the html folder, then click Refresh.\n\n"
             "Having trouble? Contact your office administrator.",
         )

@@ -1,8 +1,10 @@
 # The Center — Office Tools
 
-A small desktop app for new office members. A sidebar on the left lists
-every HTML guide in the `html/` folder; clicking one shows it in the main
-pane on the right, right inside the app:
+A small desktop app for new office members. It opens to a Home page
+explaining what the app is for and how to use it. A sidebar on the left
+(collapsible via the arrow at its top) lists every HTML guide in the
+`html/` folder; clicking one shows it in the main pane on the right,
+right inside the app:
 
 - Plain guides open in a lightweight built-in viewer
   ([tkinterweb](https://github.com/Andereoo/TkinterWeb)).
@@ -240,10 +242,13 @@ icon all work normally.
 This is also built into the app via the **"How to Use This Launcher"**
 button, so new hires can self-serve:
 
-1. Click any item in the sidebar to open it in the main pane.
-2. Items marked with **↗** are interactive tools that need real JavaScript
+1. Click **Home** at the top of the sidebar any time to return to the
+   welcome overview of what the app is for.
+2. Click any other item in the sidebar to open it in the main pane.
+3. Items marked with **↗** are interactive tools that need real JavaScript
    to run — they show an **Open Tool** button (or **Open in Browser**, if
    pywebview isn't installed) instead of rendering in the built-in viewer.
-3. Use **Search** at the top of the sidebar to filter the list by name.
-4. If an expected document is missing, ask an admin to add it to `html/`,
+4. Use **Search** to filter the list by name, or the arrow at the top of
+   the sidebar to collapse it out of the way.
+5. If an expected document is missing, ask an admin to add it to `html/`,
    then click **Refresh** at the bottom of the sidebar.
