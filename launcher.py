@@ -655,28 +655,14 @@ class LauncherApp:
         current_query = self._last_search_query
         for widget in self.root.winfo_children():
             widget.destroy()
-        # CustomTkinter's CTkScrollableFrame registers a handful of
-        # application-wide bind_all() handlers in its own __init__ (mouse
-        # wheel scrolling, plus shift-key tracking for horizontal scroll)
-        # but its destroy() never removes them. Every scrollable list we
-        # just destroyed above (the sidebar list and the page content)
-        # left its bindings registered and pointing at now-dead widgets.
-        # The next scroll anywhere in the app then fires those stale
-        # handlers too, and CustomTkinter's own scroll-handling code
-        # crashes trying to read a live widget off the event
-        # ("AttributeError: 'str' object has no attribute 'master'").
-        # Clearing them here — right after the old scrollable frames are
-        # gone and right before fresh ones are built — is safe: the new
-        # CTkScrollableFrame instances created a few lines down re-add
-        # their own clean bindings in their own __init__, so nothing is
-        # lost, only the leaked duplicates are cleared out.
-        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>",
-                         "<KeyPress-Shift_L>", "<KeyPress-Shift_R>",
-                         "<KeyRelease-Shift_L>", "<KeyRelease-Shift_R>"):
-            try:
-                self.root.unbind_all(sequence)
-            except Exception:
-                pass
+        # Both the sidebar list and the page content were just destroyed
+        # above, along with every CTkScrollableFrame binding they'd
+        # accumulated — nothing is still alive to re-arm, so rearm_nav is
+        # False. See _reset_stale_scroll_bindings for the full story: this
+        # is what fixes the "'str' object has no attribute 'master'" crash
+        # after a scroll. The fresh sidebar + content built a few lines
+        # down register their own clean bindings in their own __init__.
+        self._reset_stale_scroll_bindings(rearm_nav=False)
         self.root.configure(fg_color=WHITE_BACKDROP)
         self._build_layout(open_default_page=False)
         self.refresh_documents()
@@ -1199,9 +1185,54 @@ class LauncherApp:
         webbrowser.open(path.resolve().as_uri())
 
     # ---------------------------------------------------- content pane --
+    def _reset_stale_scroll_bindings(self, rearm_nav=True):
+        """CustomTkinter's CTkScrollableFrame registers a handful of
+        application-wide bind_all() handlers in its own __init__ (mouse
+        wheel scrolling, plus shift-key tracking for horizontal scroll)
+        but its destroy() never removes them. Every page render creates
+        and destroys one of these (the content pane's scrollable area),
+        and Settings changes additionally destroy/recreate the sidebar's
+        (self.nav_scroll) -- each one left behind a stale binding
+        pointing at a dead widget. The next scroll anywhere in the app
+        then fires every stale handler too, and CustomTkinter's own
+        scroll code crashes trying to read a live widget off the event
+        ("AttributeError: 'str' object has no attribute 'master'").
+
+        Call this right after destroying a CTkScrollableFrame to wipe
+        all accumulated bindings. If self.nav_scroll is still alive
+        (i.e. it wasn't itself just destroyed -- the normal case for
+        plain page navigation), pass rearm_nav=True (the default) to
+        immediately re-register its bindings, since the blanket clear
+        above would otherwise silence sidebar scrolling until the next
+        full rebuild. Any freshly-created CTkScrollableFrame (e.g. the
+        new page's content) re-adds its own clean bindings in its own
+        __init__ right after this runs, so nothing else is needed."""
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>",
+                         "<KeyPress-Shift_L>", "<KeyPress-Shift_R>",
+                         "<KeyRelease-Shift_L>", "<KeyRelease-Shift_R>"):
+            try:
+                self.root.unbind_all(sequence)
+            except Exception:
+                pass
+        if rearm_nav and getattr(self, "nav_scroll", None) is not None:
+            try:
+                if self.nav_scroll.winfo_exists():
+                    if "linux" in sys.platform:
+                        self.nav_scroll.bind_all("<Button-4>", self.nav_scroll._mouse_wheel_all, add=True)
+                        self.nav_scroll.bind_all("<Button-5>", self.nav_scroll._mouse_wheel_all, add=True)
+                    else:
+                        self.nav_scroll.bind_all("<MouseWheel>", self.nav_scroll._mouse_wheel_all, add=True)
+                    self.nav_scroll.bind_all("<KeyPress-Shift_L>", self.nav_scroll._keyboard_shift_press_all, add=True)
+                    self.nav_scroll.bind_all("<KeyPress-Shift_R>", self.nav_scroll._keyboard_shift_press_all, add=True)
+                    self.nav_scroll.bind_all("<KeyRelease-Shift_L>", self.nav_scroll._keyboard_shift_release_all, add=True)
+                    self.nav_scroll.bind_all("<KeyRelease-Shift_R>", self.nav_scroll._keyboard_shift_release_all, add=True)
+            except Exception:
+                pass
+
     def _clear_content(self):
         for widget in self.content_frame.winfo_children():
             widget.destroy()
+        self._reset_stale_scroll_bindings(rearm_nav=True)
 
     def _content_header(self, title: str, extra_button=None):
         """Shared header row (icon + title, optional right-side button)
