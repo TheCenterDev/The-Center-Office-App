@@ -138,12 +138,13 @@ WELCOME_LOGO_HEIGHT = 72  # px tall on the welcome screen (bigger, roomier)
 # time in the general document list.
 SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 
-LOGIN_LOGO_HEIGHT = 88  # px tall on the login screen
-# How far above dead-center the logo sits on the login screen, in pixels.
-# The login card itself stays at the true window center (relx/rely 0.5,
-# anchor "center", no offset) — only the logo is pushed up from there —
-# so the card's position never depends on the logo's size.
-LOGIN_LOGO_OFFSET_Y = -150
+LOGIN_LOGO_HEIGHT = 80  # px tall on the login screen
+# Logo and card are stacked in one column (logo on top, card below) and
+# that whole stack is centered as a unit, so the two never overlap.
+LOGIN_FIELD_WIDTH = 300  # width of the username field, and of the
+                          # password field + arrow button combined
+LOGIN_BUTTON_WIDTH = 46
+LOGIN_FIELD_HEIGHT = 38
 
 # No real email/accounts system yet — these two hardcoded logins are a
 # placeholder gate until The Center wants real per-person accounts.
@@ -282,28 +283,31 @@ class LauncherApp:
     # ------------------------------------------------------------ login --
     def _show_login_screen(self):
         """Blank white gate shown on launch, before any app content builds.
-        The login card sits at the window's true center (place() with
-        relx/rely 0.5, anchor "center", no offset); the logo is pushed up
-        from that same center point independently, so the card's position
-        never shifts based on the logo's size."""
+        The logo and the login card are stacked in a single column (logo
+        on top, card directly below) and that whole stack is centered as
+        one unit in the window, so the two never overlap regardless of
+        the card's size."""
         self.login_screen = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
         self.login_screen.pack(fill="both", expand=True)
 
-        logo_holder = ctk.CTkFrame(self.login_screen, fg_color=BODY_BG)
-        self._render_logo(logo_holder, self._login_logo, 72, anchor="center")
-        logo_holder.place(relx=0.5, rely=0.5, anchor="center", y=LOGIN_LOGO_OFFSET_Y)
+        stack = ctk.CTkFrame(self.login_screen, fg_color=BODY_BG)
+        stack.place(relx=0.5, rely=0.5, anchor="center")
+
+        logo_holder = ctk.CTkFrame(stack, fg_color=BODY_BG)
+        logo_holder.pack(pady=(0, 22))
+        self._render_logo(logo_holder, self._login_logo, LOGIN_LOGO_HEIGHT, anchor="center")
 
         card = ctk.CTkFrame(
-            self.login_screen, fg_color=CARD_BG, corner_radius=16, border_width=1, border_color=BORDER
+            stack, fg_color=CARD_BG, corner_radius=16, border_width=1, border_color=BORDER
         )
-        card.place(relx=0.5, rely=0.5, anchor="center")
+        card.pack()
 
         inner = ctk.CTkFrame(card, fg_color=CARD_BG)
-        inner.pack(padx=36, pady=32)
+        inner.pack(padx=24, pady=20)
 
         ctk.CTkLabel(
-            inner, text="Sign In", font=(FONT_FAMILY, 18, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
-        ).pack(pady=(0, 20))
+            inner, text="Sign In", font=(FONT_FAMILY, 15, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
+        ).pack(anchor="w", pady=(0, 12))
 
         username_var = StringVar()
         password_var = StringVar()
@@ -314,27 +318,29 @@ class LauncherApp:
             textvariable=username_var,
             placeholder_text="Username",
             font=(FONT_FAMILY, 12),
-            height=38,
+            height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
-            width=240,
+            width=LOGIN_FIELD_WIDTH,
         )
-        username_entry.pack(pady=(0, 10))
+        username_entry.pack(pady=(0, 8))
+
+        # Password field + submit arrow sit flush against each other in
+        # one row, sized so together they match the username field's
+        # width above — reads as one seamless control instead of two.
+        password_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
+        password_row.pack()
 
         password_entry = ctk.CTkEntry(
-            inner,
+            password_row,
             textvariable=password_var,
             placeholder_text="Password",
             show="•",
             font=(FONT_FAMILY, 12),
-            height=38,
+            height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
-            width=240,
+            width=LOGIN_FIELD_WIDTH - LOGIN_BUTTON_WIDTH,
         )
-        password_entry.pack(pady=(0, 6))
-
-        ctk.CTkLabel(
-            inner, textvariable=error_var, font=(FONT_FAMILY, 11), text_color="#c0392b", fg_color=CARD_BG
-        ).pack(pady=(0, 4))
+        password_entry.pack(side="left")
 
         def attempt_login(*_event):
             username = username_var.get().strip().lower()
@@ -354,17 +360,21 @@ class LauncherApp:
             self.refresh_documents()
 
         ctk.CTkButton(
-            inner,
-            text="Log In",
-            font=(FONT_FAMILY, 13, "bold"),
+            password_row,
+            text="→",
+            font=(FONT_FAMILY, 16, "bold"),
             fg_color=ACCENT,
             hover_color=TEXT_DARK,
             text_color="white",
-            corner_radius=10,
-            height=40,
-            width=240,
+            corner_radius=8,
+            height=LOGIN_FIELD_HEIGHT,
+            width=LOGIN_BUTTON_WIDTH,
             command=attempt_login,
-        ).pack(pady=(10, 0))
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            inner, textvariable=error_var, font=(FONT_FAMILY, 11), text_color="#c0392b", fg_color=CARD_BG
+        ).pack(pady=(8, 0))
 
         self.root.bind("<Return>", attempt_login)
         username_entry.focus_set()
