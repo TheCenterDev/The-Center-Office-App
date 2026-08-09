@@ -655,6 +655,28 @@ class LauncherApp:
         current_query = self._last_search_query
         for widget in self.root.winfo_children():
             widget.destroy()
+        # CustomTkinter's CTkScrollableFrame registers a handful of
+        # application-wide bind_all() handlers in its own __init__ (mouse
+        # wheel scrolling, plus shift-key tracking for horizontal scroll)
+        # but its destroy() never removes them. Every scrollable list we
+        # just destroyed above (the sidebar list and the page content)
+        # left its bindings registered and pointing at now-dead widgets.
+        # The next scroll anywhere in the app then fires those stale
+        # handlers too, and CustomTkinter's own scroll-handling code
+        # crashes trying to read a live widget off the event
+        # ("AttributeError: 'str' object has no attribute 'master'").
+        # Clearing them here — right after the old scrollable frames are
+        # gone and right before fresh ones are built — is safe: the new
+        # CTkScrollableFrame instances created a few lines down re-add
+        # their own clean bindings in their own __init__, so nothing is
+        # lost, only the leaked duplicates are cleared out.
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>",
+                         "<KeyPress-Shift_L>", "<KeyPress-Shift_R>",
+                         "<KeyRelease-Shift_L>", "<KeyRelease-Shift_R>"):
+            try:
+                self.root.unbind_all(sequence)
+            except Exception:
+                pass
         self.root.configure(fg_color=WHITE_BACKDROP)
         self._build_layout(open_default_page=False)
         self.refresh_documents()
