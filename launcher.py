@@ -142,9 +142,11 @@ LOGIN_LOGO_HEIGHT = 80  # px tall on the login screen
 # Logo and card are stacked in one column (logo on top, card below) and
 # that whole stack is centered as a unit, so the two never overlap.
 LOGIN_FIELD_WIDTH = 300  # width of the username field, and of the
-                          # password field + arrow button combined
+                          # password field + arrow button + gap combined
 LOGIN_BUTTON_WIDTH = 46
+LOGIN_FIELD_GAP = 10  # space between the password field and the arrow button
 LOGIN_FIELD_HEIGHT = 38
+LOGIN_LOADING_DURATION_MS = 700  # how long the post-login loading animation shows
 
 # No real email/accounts system yet — these two hardcoded logins are a
 # placeholder gate until The Center wants real per-person accounts.
@@ -324,9 +326,9 @@ class LauncherApp:
         )
         username_entry.pack(pady=(0, 8))
 
-        # Password field + submit arrow sit flush against each other in
-        # one row, sized so together they match the username field's
-        # width above — reads as one seamless control instead of two.
+        # Password field and submit arrow sit in one row, with a gap
+        # between them, sized so together (field + gap + button) they
+        # still match the username field's width above.
         password_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
         password_row.pack()
 
@@ -338,9 +340,9 @@ class LauncherApp:
             font=(FONT_FAMILY, 12),
             height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
-            width=LOGIN_FIELD_WIDTH - LOGIN_BUTTON_WIDTH,
+            width=LOGIN_FIELD_WIDTH - LOGIN_BUTTON_WIDTH - LOGIN_FIELD_GAP,
         )
-        password_entry.pack(side="left")
+        password_entry.pack(side="left", padx=(0, LOGIN_FIELD_GAP))
 
         def attempt_login(*_event):
             username = username_var.get().strip().lower()
@@ -356,8 +358,7 @@ class LauncherApp:
             self.user_role = role
             self.root.unbind("<Return>")
             self.login_screen.destroy()
-            self._build_layout()
-            self.refresh_documents()
+            self._show_loading_screen()
 
         ctk.CTkButton(
             password_row,
@@ -378,6 +379,34 @@ class LauncherApp:
 
         self.root.bind("<Return>", attempt_login)
         username_entry.focus_set()
+
+    def _show_loading_screen(self):
+        """Brief animated screen shown right after a successful login,
+        before the sidebar/Home layout builds — same blank-white style
+        as the login screen, with an indeterminate progress bar."""
+        self.loading_screen = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
+        self.loading_screen.pack(fill="both", expand=True)
+
+        stack = ctk.CTkFrame(self.loading_screen, fg_color=BODY_BG)
+        stack.place(relx=0.5, rely=0.5, anchor="center")
+
+        logo_holder = ctk.CTkFrame(stack, fg_color=BODY_BG)
+        logo_holder.pack(pady=(0, 18))
+        self._render_logo(logo_holder, self._login_logo, LOGIN_LOGO_HEIGHT, anchor="center")
+
+        progress = ctk.CTkProgressBar(
+            stack, mode="indeterminate", width=180, progress_color=ACCENT, fg_color=ACCENT_SOFT
+        )
+        progress.pack()
+        progress.start()
+
+        def finish():
+            progress.stop()
+            self.loading_screen.destroy()
+            self._build_layout()
+            self.refresh_documents()
+
+        self.root.after(LOGIN_LOADING_DURATION_MS, finish)
 
     # ----------------------------------------------------------- layout --
     def _build_layout(self):
