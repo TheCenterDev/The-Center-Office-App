@@ -1333,13 +1333,64 @@ class LauncherApp:
 
         ctk.CTkLabel(
             scroll,
-            text="Welcome to The Center Office Application",
+            text="Welcome to the Office App",
             font=F(19, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
             wraplength=560,
             justify="left",
-        ).pack(anchor="w", pady=(0, 16))
+        ).pack(anchor="w", pady=(0, 6))
+
+        ctk.CTkLabel(
+            scroll,
+            text="This is your toolbox for office work — guides, small tools, "
+                 "and Claude Skills, all in one place. Just click around in "
+                 "the sidebar to see what's here.",
+            font=F(13),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 18))
+
+        # Callout linking out to the full employee onboarding site — this
+        # app deliberately only covers tools/Skills, so anything else new
+        # hires need (policies, other links, general instructions) points
+        # here instead of trying to duplicate it in-app.
+        portal_card = ctk.CTkFrame(scroll, fg_color=ACCENT_SOFT, corner_radius=12)
+        portal_card.pack(fill="x", pady=(0, 18))
+        portal_inner = ctk.CTkFrame(portal_card, fg_color=ACCENT_SOFT)
+        portal_inner.pack(fill="x", padx=18, pady=16)
+        ctk.CTkLabel(
+            portal_inner,
+            text="New here, or need something beyond tools and Skills?",
+            font=F(13, "bold"),
+            text_color=TEXT_DARK,
+            fg_color=ACCENT_SOFT,
+            wraplength=500,
+            justify="left",
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            portal_inner,
+            text="The Employee Portal has the rest — onboarding info, "
+                 "policies, and other helpful links.",
+            font=F(12),
+            text_color=TEXT_MUTED,
+            fg_color=ACCENT_SOFT,
+            wraplength=500,
+            justify="left",
+        ).pack(anchor="w", pady=(4, 12))
+        ctk.CTkButton(
+            portal_inner,
+            text="Open Employee Portal ↗",
+            font=F(12, "bold"),
+            fg_color=ACCENT,
+            hover_color=TEXT_DARK,
+            text_color="white",
+            corner_radius=8,
+            height=34,
+            command=lambda: webbrowser.open("https://thecenterwcy.com/employee-portal/"),
+        ).pack(anchor="w")
 
         def section(heading: str, body: str):
             ctk.CTkLabel(
@@ -1360,45 +1411,18 @@ class LauncherApp:
             ).pack(anchor="w")
 
         section(
-            "What this app is for",
-            "This app is home base for the resources that automate day-to-day "
-            "office work at The Center. Instead of digging through email "
-            "threads or asking around, everything you need — reference "
-            "guides and small tools that do part of the work for you — "
-            "lives in the sidebar on the left.",
-        )
-        section(
-            "Using the guides and tools",
-            "Click any item in the sidebar to open it. Plain guides (like "
-            "this one) display right here in the main pane. Items marked "
-            "with ↗ are interactive HTML tools — they need a real browser "
-            "to run, so they open an \"Open Tool\" card with a button that "
-            "launches them in their own window, without closing this app. "
-            "Click Apps (also pinned at the top of the sidebar) for a "
-            "dedicated list of every interactive tool currently available.",
-        )
-        section(
             "Using Claude Skills",
-            "Some repetitive office work is automated with Claude Skills — "
-            "reusable instructions Claude can follow for a specific task, "
-            "such as reconciling a bank deposit against QuickBooks or "
-            "drafting the monthly budget-vs-actual financial summary email. "
-            "You don't run these from this app — just describe what you "
-            "need to Claude in plain language (for example, \"reconcile "
-            "this deposit\" or \"draft the financials email\") and it runs "
-            "the right skill automatically.",
+            "For some tasks, just tell Claude what you need in plain "
+            "English — like \"reconcile this deposit\" or \"draft the "
+            "financials email\" — and it handles it for you. No need to "
+            "come find a button for it.",
         )
         section(
-            "Getting started",
-            "New to the office? Start with the Welcome guide in the "
-            "sidebar, then browse the rest as you need them. Press Enter "
-            "in Search (or click 🔍) to look for a word anywhere — page "
-            "names, titles, and the text inside every guide and app, not "
-            "just what's listed in the sidebar — or use the ⟨ arrow at "
-            "the top of the sidebar to collapse it out of the way. Visit "
-            "Settings (bottom of the sidebar) to switch to a dark or "
-            "eye-comfort theme, or change the text size. Questions? "
-            "Contact your office administrator.",
+            "A couple of quick tips",
+            "Anything marked ↗ opens in its own window since it needs a "
+            "real browser. Use Search to find something by name, or even "
+            "by a word inside it. And Settings (bottom of the sidebar) is "
+            "where you can switch to dark mode or make the text bigger.",
         )
 
     def _show_apps(self):
