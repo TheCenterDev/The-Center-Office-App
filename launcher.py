@@ -113,7 +113,10 @@ TEXT_DARK = "#1D2071"  # Center navy
 TEXT_MUTED = "#6b7280"
 
 SIDEBAR_BG = TEXT_DARK
-SIDEBAR_HOVER = "#2b2f8c"
+SIDEBAR_HOVER = "#2b2f8c"  # lighter navy — used as the *idle* fill for
+                           # input-like controls (search box, its buttons)
+SIDEBAR_BUTTON_HOVER = "#14164f"  # darker navy — the hover state for
+                                  # every clickable sidebar button
 SIDEBAR_ACTIVE = "#363bab"
 SIDEBAR_DIVIDER = "#33377a"
 SIDEBAR_TEXT = "#ffffff"
@@ -457,7 +460,7 @@ class LauncherApp:
             height=26,
             corner_radius=6,
             fg_color="transparent",
-            hover_color=SIDEBAR_HOVER,
+            hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT_MUTED,
             font=(FONT_FAMILY, 12, "bold"),
             command=self._toggle_sidebar,
@@ -493,7 +496,7 @@ class LauncherApp:
             anchor="w",
             font=(FONT_FAMILY, 12, "bold"),
             fg_color=SIDEBAR_BG,
-            hover_color=SIDEBAR_HOVER,
+            hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT,
             corner_radius=8,
             height=36,
@@ -528,12 +531,24 @@ class LauncherApp:
         self.search_entry.bind("<Return>", lambda _e: self._perform_search())
         ctk.CTkButton(
             search_row,
+            text="×",
+            width=26,
+            height=32,
+            corner_radius=8,
+            fg_color=SIDEBAR_HOVER,
+            hover_color=SIDEBAR_BUTTON_HOVER,
+            text_color=SIDEBAR_TEXT_MUTED,
+            font=(FONT_FAMILY, 14, "bold"),
+            command=self._clear_search,
+        ).pack(side="left", padx=(6, 0))
+        ctk.CTkButton(
+            search_row,
             text="🔍",
             width=32,
             height=32,
             corner_radius=8,
             fg_color=SIDEBAR_HOVER,
-            hover_color=ACCENT,
+            hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT,
             font=(FONT_FAMILY, 12),
             command=self._perform_search,
@@ -547,7 +562,7 @@ class LauncherApp:
             anchor="w",
             font=(FONT_FAMILY, 12, "bold"),
             fg_color=SIDEBAR_BG,
-            hover_color=SIDEBAR_HOVER,
+            hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT,
             corner_radius=8,
             height=36,
@@ -583,7 +598,7 @@ class LauncherApp:
                 anchor="w",
                 font=(FONT_FAMILY, 11),
                 fg_color="transparent",
-                hover_color=SIDEBAR_HOVER,
+                hover_color=SIDEBAR_BUTTON_HOVER,
                 text_color=SIDEBAR_TEXT_MUTED,
                 corner_radius=8,
                 height=30,
@@ -658,7 +673,7 @@ class LauncherApp:
                 anchor="w",
                 font=(FONT_FAMILY, 12),
                 fg_color=SIDEBAR_BG,
-                hover_color=SIDEBAR_HOVER,
+                hover_color=SIDEBAR_BUTTON_HOVER,
                 text_color=SIDEBAR_TEXT,
                 corner_radius=8,
                 height=36,
@@ -674,6 +689,10 @@ class LauncherApp:
         query = self.search_var.get().strip()
         if query:
             self._show_search_results(query)
+
+    def _clear_search(self):
+        self.search_var.set("")
+        self.search_entry.focus_set()
 
     def _search_pages(self, query_l: str):
         """Matches against the pinned Home/Apps pages by name, so
@@ -895,7 +914,7 @@ class LauncherApp:
                 text=text,
                 font=(FONT_FAMILY, 11),
                 fg_color="transparent",
-                hover_color=ACCENT_SOFT,
+                hover_color=TEXT_DARK,
                 text_color=ACCENT,
                 border_width=0,
                 corner_radius=8,
