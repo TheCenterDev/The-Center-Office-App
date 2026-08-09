@@ -69,6 +69,8 @@ import json
 import re
 import subprocess
 import sys
+import time
+import traceback
 import webbrowser
 from pathlib import Path
 from tkinter import StringVar, messagebox
@@ -281,6 +283,40 @@ BASE_DIR = get_base_dir()
 HTML_DIR = BASE_DIR / "html"
 ASSETS_DIR = BASE_DIR / "assets"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+ERROR_LOG_FILE = BASE_DIR / "error_log.txt"
+
+
+def write_error_log(details: str):
+    """Best-effort append to error_log.txt next to html/ and assets/."""
+    try:
+        with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"\n---- {time.strftime('%Y-%m-%d %H:%M:%S')} ----\n{details}")
+    except OSError:
+        pass
+
+
+def log_and_show_error(exc_type, exc_value, exc_tb):
+    """Installed as root.report_callback_exception (see main()). Tkinter
+    normally just prints exceptions raised inside event callbacks —
+    button commands, after()-scheduled calls, etc. — to stderr and
+    otherwise silently keeps going, which is invisible in a packaged
+    windowed app with no console attached. This instead writes the full
+    traceback to error_log.txt next to html/ and assets/, and shows a
+    one-time popup pointing at it, so a bug like 'the page went blank
+    after clicking X' produces an actual diagnosable error instead of
+    just a support request with no evidence."""
+    write_error_log("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+    try:
+        messagebox.showerror(
+            WINDOW_TITLE,
+            "Something went wrong and part of the app may not have updated "
+            "correctly.\n\nDetails were saved to error_log.txt next to this "
+            "app. Please share that file if you report the problem.\n\n"
+            f"{exc_type.__name__}: {exc_value}",
+        )
+    except Exception:
+        pass
+
 
 DEFAULT_SETTINGS = {
     "theme": "light",  # "light" | "dark" | "eye_comfort" | "system"
@@ -590,7 +626,7 @@ class LauncherApp:
         self.root.after(LOGIN_LOADING_DURATION_MS, finish)
 
     # ----------------------------------------------------------- layout --
-    def _build_layout(self):
+    def _build_layout(self, open_default_page=True):
         container = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
         container.pack(fill="both", expand=True)
 
@@ -598,10 +634,16 @@ class LauncherApp:
 
         self.content_frame = ctk.CTkFrame(container, fg_color=BODY_BG, corner_radius=0)
         self.content_frame.pack(side="left", fill="both", expand=True)
-        if self.settings.get("default_page") == "apps":
-            self._show_apps()
-        else:
-            self._show_home()
+        # open_default_page=False during _rebuild_ui — it immediately
+        # re-opens whatever page was actually showing (which could well
+        # be a different one, e.g. Settings) via _restore_view, so
+        # rendering Home/Apps here first would just be an extra,
+        # unnecessary render that gets thrown away a moment later.
+        if open_default_page:
+            if self.settings.get("default_page") == "apps":
+                self._show_apps()
+            else:
+                self._show_home()
 
     def _rebuild_ui(self):
         """Tears down and rebuilds the whole sidebar + content pane, then
@@ -614,9 +656,28 @@ class LauncherApp:
         for widget in self.root.winfo_children():
             widget.destroy()
         self.root.configure(fg_color=WHITE_BACKDROP)
-        self._build_layout()
+        self._build_layout(open_default_page=False)
         self.refresh_documents()
-        self._restore_view(current_path, current_query)
+        try:
+            self._restore_view(current_path, current_query)
+        except Exception:
+            # Caught here (rather than left to report_callback_exception)
+            # so the app can fall back to a working Home page instead of
+            # leaving a blank content pane — still logged and surfaced,
+            # just with a recovery instead of just an error popup.
+            write_error_log(
+                f"(recovered in _rebuild_ui, restoring {current_path!r})\n{traceback.format_exc()}"
+            )
+            try:
+                messagebox.showwarning(
+                    WINDOW_TITLE,
+                    "That change applied, but reopening the page you were on "
+                    "ran into a problem, so you've been returned to Home. "
+                    "Details were saved to error_log.txt next to this app.",
+                )
+            except Exception:
+                pass
+            self._show_home()
 
     def _restore_view(self, selected_path, last_search_query):
         if selected_path is None:
@@ -1649,6 +1710,10 @@ def main():
     HTML_DIR.mkdir(exist_ok=True)
     ASSETS_DIR.mkdir(exist_ok=True)
     root = ctk.CTk()
+    # Surface exceptions raised inside button clicks / after() callbacks
+    # instead of letting Tkinter silently swallow them to a stderr that
+    # doesn't exist in a packaged windowed app — see log_and_show_error.
+    root.report_callback_exception = log_and_show_error
     LauncherApp(root)
     root.mainloop()
 
