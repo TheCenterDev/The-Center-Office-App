@@ -65,6 +65,7 @@ without installing Python.
 """
 
 import html
+import json
 import re
 import subprocess
 import sys
@@ -104,13 +105,90 @@ WINDOW_SIZE = "1040x640"
 
 # ---- palette: real Center brand colors — extracted directly from
 # assets/logo.png. Navy sidebar, white content pane, cyan accents. ------
+#
+# The sidebar (navy, white text) stays the same in every theme below —
+# it's already a "dark" panel by brand design, so it isn't part of the
+# light/dark/eye-comfort switch. Only the main content pane's colors
+# (BODY_BG, CARD_BG, BORDER, TEXT_DARK, TEXT_MUTED, ACCENT_SOFT) change
+# with the theme — see THEMES and apply_theme() below. They start out
+# as plain module globals (the "light" values) and get reassigned by
+# apply_theme(); every place that uses them (e.g. fg_color=BODY_BG)
+# looks the name up fresh each time a widget is built, so re-running
+# the page-building methods after a theme change is enough to reskin
+# the whole app — no per-widget color tuples needed.
 BODY_BG = "#ffffff"
 CARD_BG = "#ffffff"
 BORDER = "#dde1ee"
-ACCENT = "#00C0F3"  # Center cyan
+ACCENT = "#00C0F3"  # Center cyan — constant across all themes
 ACCENT_SOFT = "#e3f8ff"
-TEXT_DARK = "#1D2071"  # Center navy
+TEXT_DARK = "#1D2071"  # primary text color — navy in the light theme,
+                       # despite the name, this becomes off-white in dark
 TEXT_MUTED = "#6b7280"
+
+# Always white, regardless of theme — used for the login/loading screens
+# (explicitly meant to stay a blank white gate) and anywhere the real
+# logo is drawn, since its navy ink needs a light backdrop to read at
+# all and there's no separate light-mode logo asset.
+WHITE_BACKDROP = "#ffffff"
+
+THEMES = {
+    "light": dict(
+        BODY_BG="#ffffff", CARD_BG="#ffffff", BORDER="#dde1ee",
+        TEXT_DARK="#1D2071", TEXT_MUTED="#6b7280", ACCENT_SOFT="#e3f8ff",
+    ),
+    "dark": dict(
+        BODY_BG="#14161f", CARD_BG="#1c1f2b", BORDER="#2b2f3d",
+        TEXT_DARK="#f2f4fa", TEXT_MUTED="#9aa0b4", ACCENT_SOFT="#0f2f3d",
+    ),
+    "eye_comfort": dict(
+        # Warm, low-glare "paper" palette (like an e-reader's sepia mode)
+        # for people sensitive to bright white screens.
+        BODY_BG="#f4ecd8", CARD_BG="#faf3e3", BORDER="#e3d5b8",
+        TEXT_DARK="#4a3b23", TEXT_MUTED="#8a7a5c", ACCENT_SOFT="#e9dcc0",
+    ),
+}
+THEME_LABELS = {"light": "Light", "dark": "Dark", "eye_comfort": "Eye Comfort", "system": "System"}
+
+
+def resolve_theme(theme_name: str) -> str:
+    """"system" follows the OS's light/dark preference (via darkdetect,
+    which customtkinter already depends on); falls back to "light" if
+    that can't be detected. Any other theme name is already concrete."""
+    if theme_name != "system":
+        return theme_name if theme_name in THEMES else "light"
+    try:
+        import darkdetect
+        return "dark" if darkdetect.isDark() else "light"
+    except Exception:
+        return "light"
+
+
+def apply_theme(theme_name: str):
+    """Reassigns the module-level color globals to the chosen theme's
+    values. Because every widget builder reads these as bare globals
+    (not values captured at import time), simply rebuilding the visible
+    pages after calling this is enough to reskin the whole app."""
+    globals().update(THEMES[resolve_theme(theme_name)])
+
+
+FONT_SCALES = {"small": 0.9, "normal": 1.0, "large": 1.15, "xlarge": 1.3}
+FONT_SCALE_LABELS = {"small": "Small", "normal": "Normal", "large": "Large", "xlarge": "Extra Large"}
+FONT_SCALE = 1.0
+
+
+def apply_font_scale(scale_name: str):
+    global FONT_SCALE
+    FONT_SCALE = FONT_SCALES.get(scale_name, 1.0)
+
+
+def F(size, weight=None):
+    """Build a (family, size, [weight]) font tuple scaled by the current
+    FONT_SCALE, so changing the Text Size setting scales every label,
+    button, and entry in the app consistently instead of needing a
+    separate size chosen per widget."""
+    scaled = max(1, round(size * FONT_SCALE))
+    return (FONT_FAMILY, scaled, weight) if weight else (FONT_FAMILY, scaled)
+
 
 SIDEBAR_BG = TEXT_DARK
 SIDEBAR_HOVER = "#2b2f8c"  # lighter navy — used as the *idle* fill for
@@ -156,6 +234,15 @@ LOGIN_FIELD_GAP = 10  # space between the password field and the arrow button
 LOGIN_FIELD_HEIGHT = 38
 LOGIN_LOADING_DURATION_MS = 700  # how long the post-login loading animation shows
 
+# Fixed colors (not the theme-variable BODY_BG/CARD_BG/TEXT_DARK/
+# ACCENT_SOFT globals) for the handful of surfaces that intentionally
+# always look the same no matter which Settings theme is active: the
+# login/loading screens, and the sidebar header (which stays white so
+# the logo's navy ink stays legible even in Dark or Eye Comfort mode).
+LOGIN_TEXT = "#1D2071"
+LOGIN_BORDER = "#dde1ee"
+LOGIN_ACCENT_SOFT = "#e3f8ff"
+
 # No real email/accounts system yet — these two hardcoded logins are a
 # placeholder gate until The Center wants real per-person accounts.
 ADMIN_USERNAME = "admin"
@@ -193,6 +280,42 @@ def get_base_dir() -> Path:
 BASE_DIR = get_base_dir()
 HTML_DIR = BASE_DIR / "html"
 ASSETS_DIR = BASE_DIR / "assets"
+SETTINGS_FILE = BASE_DIR / "settings.json"
+
+DEFAULT_SETTINGS = {
+    "theme": "light",  # "light" | "dark" | "eye_comfort" | "system"
+    "font_scale": "normal",  # key into FONT_SCALES
+    "default_page": "home",  # "home" | "apps" — which page shows right after login
+    "sidebar_expanded": True,
+    "remember_username": True,  # prefill the last-used login username
+    "last_username": "",
+}
+
+
+def load_settings() -> dict:
+    """Reads settings.json next to html/ and assets/, filling in any
+    missing keys with defaults (so adding a new setting later doesn't
+    break existing installs) and tolerating a missing or corrupt file
+    by falling back to defaults entirely."""
+    settings = dict(DEFAULT_SETTINGS)
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        if isinstance(saved, dict):
+            settings.update({k: v for k, v in saved.items() if k in DEFAULT_SETTINGS})
+    except (OSError, ValueError):
+        pass
+    return settings
+
+
+def save_settings(settings: dict):
+    """Best-effort write — if the folder isn't writable for some reason,
+    the app just falls back to defaults next launch instead of crashing."""
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+    except OSError:
+        pass
 
 
 def display_name_from_filename(filename: str) -> str:
@@ -287,22 +410,30 @@ class LauncherApp:
         self.documents = []  # list of (sort_key, title, path, is_program)
         self.filtered = []
         self._nav_buttons = {}  # path -> CTkButton, for highlighting the active row
-        self._selected_path = None  # None = Home, "apps" = Apps, else a document Path
-        self._sidebar_expanded = True
+        self._selected_path = None  # None = Home, "apps" = Apps, "settings" = Settings,
+                                     # "search" = search results, else a document Path
+        self._last_search_query = ""
         self.home_button = None
         self.apps_button = None
+        self.settings_button = None
         self.user_role = None  # "admin" or "staff" once logged in
+
+        self.settings = load_settings()
+        self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
+        apply_theme(self.settings.get("theme", "light"))
+        apply_font_scale(self.settings.get("font_scale", "normal"))
+
         self._sidebar_logo = load_logo_image(LOGO_HEIGHT)
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
         self._login_logo = load_logo_image(LOGIN_LOGO_HEIGHT)
 
-        ctk.set_appearance_mode("light")
+        ctk.set_appearance_mode(resolve_theme(self.settings.get("theme", "light")))
         ctk.set_default_color_theme("blue")
 
         root.title(WINDOW_TITLE)
         root.geometry(WINDOW_SIZE)
         root.minsize(860, 520)
-        root.configure(fg_color=BODY_BG)
+        root.configure(fg_color=WHITE_BACKDROP)
 
         self._show_login_screen()
 
@@ -313,29 +444,30 @@ class LauncherApp:
         on top, card directly below) and that whole stack is centered as
         one unit in the window, so the two never overlap regardless of
         the card's size."""
-        self.login_screen = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
+        self.login_screen = ctk.CTkFrame(self.root, fg_color=WHITE_BACKDROP, corner_radius=0)
         self.login_screen.pack(fill="both", expand=True)
 
-        stack = ctk.CTkFrame(self.login_screen, fg_color=BODY_BG)
+        stack = ctk.CTkFrame(self.login_screen, fg_color=WHITE_BACKDROP)
         stack.place(relx=0.5, rely=0.5, anchor="center")
 
-        logo_holder = ctk.CTkFrame(stack, fg_color=BODY_BG)
+        logo_holder = ctk.CTkFrame(stack, fg_color=WHITE_BACKDROP)
         logo_holder.pack(pady=(0, 22))
         self._render_logo(logo_holder, self._login_logo, LOGIN_LOGO_HEIGHT, anchor="center")
 
         card = ctk.CTkFrame(
-            stack, fg_color=CARD_BG, corner_radius=16, border_width=1, border_color=BORDER
+            stack, fg_color=WHITE_BACKDROP, corner_radius=16, border_width=1, border_color=LOGIN_BORDER
         )
         card.pack()
 
-        inner = ctk.CTkFrame(card, fg_color=CARD_BG)
+        inner = ctk.CTkFrame(card, fg_color=WHITE_BACKDROP)
         inner.pack(padx=24, pady=20)
 
         ctk.CTkLabel(
-            inner, text="Sign In", font=(FONT_FAMILY, 15, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
+            inner, text="Sign In", font=F(15, "bold"), text_color=LOGIN_TEXT, fg_color=WHITE_BACKDROP
         ).pack(anchor="w", pady=(0, 12))
 
-        username_var = StringVar()
+        remembered_username = self.settings.get("last_username", "") if self.settings.get("remember_username", True) else ""
+        username_var = StringVar(value=remembered_username)
         password_var = StringVar()
         error_var = StringVar()
 
@@ -343,7 +475,7 @@ class LauncherApp:
             inner,
             textvariable=username_var,
             placeholder_text="Username",
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
             width=LOGIN_FIELD_WIDTH,
@@ -353,7 +485,7 @@ class LauncherApp:
         # Password field and submit arrow sit in one row, with a gap
         # between them, sized so together (field + gap + button) they
         # still match the username field's width above.
-        password_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
+        password_row = ctk.CTkFrame(inner, fg_color=WHITE_BACKDROP)
         password_row.pack()
 
         password_entry = ctk.CTkEntry(
@@ -361,7 +493,7 @@ class LauncherApp:
             textvariable=password_var,
             placeholder_text="Password",
             show="•",
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
             width=LOGIN_FIELD_WIDTH - LOGIN_BUTTON_WIDTH - LOGIN_FIELD_GAP,
@@ -380,6 +512,9 @@ class LauncherApp:
                 password_var.set("")
                 return
             self.user_role = role
+            if self.settings.get("remember_username", True):
+                self.settings["last_username"] = username
+                save_settings(self.settings)
             self.root.unbind("<Return>")
             self.login_screen.destroy()
             self._show_loading_screen()
@@ -387,9 +522,9 @@ class LauncherApp:
         ctk.CTkButton(
             password_row,
             text="→",
-            font=(FONT_FAMILY, 16, "bold"),
+            font=F(16, "bold"),
             fg_color=ACCENT,
-            hover_color=TEXT_DARK,
+            hover_color=LOGIN_TEXT,
             text_color="white",
             corner_radius=8,
             height=LOGIN_FIELD_HEIGHT,
@@ -398,28 +533,28 @@ class LauncherApp:
         ).pack(side="left")
 
         ctk.CTkLabel(
-            inner, textvariable=error_var, font=(FONT_FAMILY, 11), text_color="#c0392b", fg_color=CARD_BG
+            inner, textvariable=error_var, font=F(11), text_color="#c0392b", fg_color=WHITE_BACKDROP
         ).pack(pady=(8, 0))
 
         self.root.bind("<Return>", attempt_login)
-        username_entry.focus_set()
+        (password_entry if remembered_username else username_entry).focus_set()
 
     def _show_loading_screen(self):
         """Brief animated screen shown right after a successful login,
         before the sidebar/Home layout builds — same blank-white style
         as the login screen, with an indeterminate progress bar."""
-        self.loading_screen = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
+        self.loading_screen = ctk.CTkFrame(self.root, fg_color=WHITE_BACKDROP, corner_radius=0)
         self.loading_screen.pack(fill="both", expand=True)
 
-        stack = ctk.CTkFrame(self.loading_screen, fg_color=BODY_BG)
+        stack = ctk.CTkFrame(self.loading_screen, fg_color=WHITE_BACKDROP)
         stack.place(relx=0.5, rely=0.5, anchor="center")
 
-        logo_holder = ctk.CTkFrame(stack, fg_color=BODY_BG)
+        logo_holder = ctk.CTkFrame(stack, fg_color=WHITE_BACKDROP)
         logo_holder.pack(pady=(0, 18))
         self._render_logo(logo_holder, self._login_logo, LOGIN_LOGO_HEIGHT, anchor="center")
 
         progress = ctk.CTkProgressBar(
-            stack, mode="indeterminate", width=180, progress_color=ACCENT, fg_color=ACCENT_SOFT
+            stack, mode="indeterminate", width=180, progress_color=ACCENT, fg_color=LOGIN_ACCENT_SOFT
         )
         progress.pack()
         progress.start()
@@ -441,7 +576,47 @@ class LauncherApp:
 
         self.content_frame = ctk.CTkFrame(container, fg_color=BODY_BG, corner_radius=0)
         self.content_frame.pack(side="left", fill="both", expand=True)
-        self._show_home()
+        if self.settings.get("default_page") == "apps":
+            self._show_apps()
+        else:
+            self._show_home()
+
+    def _rebuild_ui(self):
+        """Tears down and rebuilds the whole sidebar + content pane, then
+        reopens whatever page was showing. Needed after a Settings change
+        (theme, font size, ...) because CustomTkinter widgets don't
+        re-read the color/font globals on their own once built — the
+        only way to reskin what's already on screen is to rebuild it."""
+        current_path = self._selected_path
+        current_query = self._last_search_query
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        self.root.configure(fg_color=WHITE_BACKDROP)
+        self._build_layout()
+        self.refresh_documents()
+        self._restore_view(current_path, current_query)
+
+    def _restore_view(self, selected_path, last_search_query):
+        if selected_path is None:
+            self._show_home()
+        elif selected_path == "apps":
+            self._show_apps()
+        elif selected_path == "settings":
+            self._show_settings()
+        elif selected_path == "search":
+            if last_search_query:
+                self._show_search_results(last_search_query)
+            else:
+                self._show_home()
+        elif isinstance(selected_path, Path):
+            match = next((d for d in self.documents if d[2] == selected_path), None)
+            if match:
+                _, title, path, is_program = match
+                self._select_document(path, title, is_program)
+            else:
+                self._show_home()
+        else:
+            self._show_home()
 
     # ---------------------------------------------------------- sidebar --
     def _build_sidebar(self, parent):
@@ -462,7 +637,7 @@ class LauncherApp:
             fg_color="transparent",
             hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT_MUTED,
-            font=(FONT_FAMILY, 12, "bold"),
+            font=F(12, "bold"),
             command=self._toggle_sidebar,
         )
         self.toggle_button.pack(anchor="e", padx=6, pady=6)
@@ -472,18 +647,20 @@ class LauncherApp:
         self.sidebar_content = ctk.CTkFrame(self.sidebar, fg_color=SIDEBAR_BG, corner_radius=0)
         self.sidebar_content.pack(fill="both", expand=True)
 
-        # Header stays white so the real (navy-and-cyan) logo is readable
-        # — it would disappear if drawn directly on the navy sidebar.
-        header = ctk.CTkFrame(self.sidebar_content, fg_color=BODY_BG, corner_radius=0)
+        # Header always stays white (WHITE_BACKDROP, not the theme-variable
+        # BODY_BG) so the real navy-and-cyan logo stays readable regardless
+        # of theme — it would disappear if drawn directly on the navy
+        # sidebar, or wash out against a dark-mode background.
+        header = ctk.CTkFrame(self.sidebar_content, fg_color=WHITE_BACKDROP, corner_radius=0)
         header.pack(fill="x")
-        header_inner = ctk.CTkFrame(header, fg_color=BODY_BG)
+        header_inner = ctk.CTkFrame(header, fg_color=WHITE_BACKDROP)
         header_inner.pack(padx=18, pady=18)
         self._render_logo(header_inner, self._sidebar_logo, LOGO_SIZE, anchor="center")
         ctk.CTkLabel(
-            header_inner, text=APP_NAME, font=(FONT_FAMILY, 14, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG
+            header_inner, text=APP_NAME, font=F(14, "bold"), text_color=LOGIN_TEXT, fg_color=WHITE_BACKDROP
         ).pack(anchor="center", pady=(8, 0))
         ctk.CTkLabel(
-            header_inner, text=APP_TAGLINE, font=(FONT_FAMILY, 10), text_color=ACCENT, fg_color=BODY_BG
+            header_inner, text=APP_TAGLINE, font=F(10), text_color=ACCENT, fg_color=WHITE_BACKDROP
         ).pack(anchor="center")
 
         ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
@@ -494,7 +671,7 @@ class LauncherApp:
             home_row,
             text="Home",
             anchor="w",
-            font=(FONT_FAMILY, 12, "bold"),
+            font=F(12, "bold"),
             fg_color=SIDEBAR_BG,
             hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT,
@@ -519,7 +696,7 @@ class LauncherApp:
             search_row,
             textvariable=self.search_var,
             placeholder_text="Search…",
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             height=32,
             corner_radius=8,
             fg_color=SIDEBAR_HOVER,
@@ -538,7 +715,7 @@ class LauncherApp:
             fg_color=SIDEBAR_HOVER,
             hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT_MUTED,
-            font=(FONT_FAMILY, 14, "bold"),
+            font=F(14, "bold"),
             command=self._clear_search,
         ).pack(side="left", padx=(6, 0))
         ctk.CTkButton(
@@ -550,7 +727,7 @@ class LauncherApp:
             fg_color=SIDEBAR_HOVER,
             hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT,
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             command=self._perform_search,
         ).pack(side="left", padx=(6, 0))
 
@@ -560,7 +737,7 @@ class LauncherApp:
             apps_row,
             text="Apps",
             anchor="w",
-            font=(FONT_FAMILY, 12, "bold"),
+            font=F(12, "bold"),
             fg_color=SIDEBAR_BG,
             hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT,
@@ -575,8 +752,23 @@ class LauncherApp:
 
         self._build_sidebar_footer(self.sidebar_content)
 
+        # _build_sidebar always constructs the expanded layout above;
+        # apply a previously-saved collapsed state now that everything
+        # exists, without toggling self._sidebar_expanded itself.
+        self._apply_sidebar_state()
+
     def _toggle_sidebar(self):
         self._sidebar_expanded = not self._sidebar_expanded
+        self._apply_sidebar_state()
+        self.settings["sidebar_expanded"] = self._sidebar_expanded
+        save_settings(self.settings)
+
+    def _apply_sidebar_state(self):
+        """Applies self._sidebar_expanded to the already-built sidebar
+        widgets, without flipping it — used both by _toggle_sidebar and
+        right after _build_sidebar constructs everything in its default
+        (expanded) layout, so a collapsed state saved from a previous
+        launch (or restored via Settings) actually takes effect."""
         if self._sidebar_expanded:
             self.sidebar.configure(width=SIDEBAR_WIDTH)
             self.sidebar_content.pack(fill="both", expand=True)
@@ -596,7 +788,7 @@ class LauncherApp:
                 footer,
                 text=text,
                 anchor="w",
-                font=(FONT_FAMILY, 11),
+                font=F(11),
                 fg_color="transparent",
                 hover_color=SIDEBAR_BUTTON_HOVER,
                 text_color=SIDEBAR_TEXT_MUTED,
@@ -606,18 +798,23 @@ class LauncherApp:
             )
 
         footer_button("Refresh", self.refresh_documents).pack(fill="x", pady=1)
+        self.settings_button = footer_button("Settings", self._show_settings)
+        self.settings_button.pack(fill="x", pady=1)
         footer_button("How to Use This Launcher", self.show_help).pack(fill="x", pady=1)
         footer_button("Quit", self.root.destroy).pack(fill="x", pady=1)
 
     def _render_logo(self, parent, logo_image, placeholder_size, anchor="w"):
         """Show a real logo if assets/logo.* exists, otherwise a clean
         rounded placeholder mark so the app still looks finished today.
-        Always drawn on a white background — see load_logo_image.
-        `anchor` controls horizontal alignment within `parent`: "w" for
-        the left-aligned Home-page usage, "center" for the sidebar header
-        and login screen, where the logo should sit dead-center."""
+        Always drawn on WHITE_BACKDROP (fixed white, not the theme-variable
+        BODY_BG) — see load_logo_image — since the logo's navy ink needs a
+        light background to read regardless of the active theme, and every
+        caller now wraps this in a WHITE_BACKDROP-colored holder frame to
+        match. `anchor` controls horizontal alignment within `parent`: "w"
+        for the left-aligned Home-page usage, "center" for the sidebar
+        header and login/loading screens, where it should sit dead-center."""
         if logo_image is not None:
-            ctk.CTkLabel(parent, image=logo_image, text="", fg_color=BODY_BG).pack(anchor=anchor)
+            ctk.CTkLabel(parent, image=logo_image, text="", fg_color=WHITE_BACKDROP).pack(anchor=anchor)
             return
 
         ctk.CTkLabel(
@@ -628,7 +825,7 @@ class LauncherApp:
             corner_radius=placeholder_size // 2,
             fg_color=ACCENT,
             text_color="white",
-            font=(FONT_FAMILY, int(placeholder_size * 0.4), "bold"),
+            font=F(int(placeholder_size * 0.4), "bold"),
         ).pack(anchor=anchor)
 
     # --------------------------------------------------------- behavior --
@@ -657,7 +854,7 @@ class LauncherApp:
             ctk.CTkLabel(
                 self.nav_scroll,
                 text=f"No documents found yet.\nAdd .html files to:\n{HTML_DIR}",
-                font=(FONT_FAMILY, 11),
+                font=F(11),
                 text_color=SIDEBAR_TEXT_MUTED,
                 fg_color=SIDEBAR_BG,
                 justify="left",
@@ -671,7 +868,7 @@ class LauncherApp:
                 self.nav_scroll,
                 text=label,
                 anchor="w",
-                font=(FONT_FAMILY, 12),
+                font=F(12),
                 fg_color=SIDEBAR_BG,
                 hover_color=SIDEBAR_BUTTON_HOVER,
                 text_color=SIDEBAR_TEXT,
@@ -731,6 +928,7 @@ class LauncherApp:
         names, every document's title, and every document's full text),
         not just the currently-visible sidebar list."""
         self._selected_path = "search"
+        self._last_search_query = query
         self._clear_content()
         self._highlight_nav("search")
 
@@ -745,7 +943,7 @@ class LauncherApp:
         ctk.CTkLabel(
             scroll,
             text=f'Search results for "{query}"',
-            font=(FONT_FAMILY, 19, "bold"),
+            font=F(19, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
             wraplength=560,
@@ -754,7 +952,7 @@ class LauncherApp:
         ctk.CTkLabel(
             scroll,
             text=f"{total} match{'es' if total != 1 else ''} found across pages, guides, and apps.",
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
         ).pack(anchor="w", pady=(2, 18))
@@ -763,7 +961,7 @@ class LauncherApp:
             ctk.CTkLabel(
                 scroll,
                 text="No matches. Try a different word.",
-                font=(FONT_FAMILY, 12),
+                font=F(12),
                 text_color=TEXT_MUTED,
                 fg_color=BODY_BG,
             ).pack(anchor="w")
@@ -778,19 +976,19 @@ class LauncherApp:
             top = ctk.CTkFrame(row, fg_color=CARD_BG)
             top.pack(fill="x")
             ctk.CTkLabel(
-                top, text=title, font=(FONT_FAMILY, 14, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG, anchor="w"
+                top, text=title, font=F(14, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG, anchor="w"
             ).pack(side="left")
             badge = ctk.CTkFrame(top, fg_color=ACCENT_SOFT, corner_radius=6)
             badge.pack(side="right")
             ctk.CTkLabel(
-                badge, text=kind_label, font=(FONT_FAMILY, 10, "bold"), text_color=ACCENT, fg_color=ACCENT_SOFT
+                badge, text=kind_label, font=F(10, "bold"), text_color=ACCENT, fg_color=ACCENT_SOFT
             ).pack(padx=8, pady=2)
 
             if snippet:
                 ctk.CTkLabel(
                     row,
                     text=snippet,
-                    font=(FONT_FAMILY, 11),
+                    font=F(11),
                     text_color=TEXT_MUTED,
                     fg_color=CARD_BG,
                     anchor="w",
@@ -801,7 +999,7 @@ class LauncherApp:
             ctk.CTkButton(
                 row,
                 text="Open",
-                font=(FONT_FAMILY, 11, "bold"),
+                font=F(11, "bold"),
                 fg_color=ACCENT,
                 hover_color=TEXT_DARK,
                 text_color="white",
@@ -833,6 +1031,11 @@ class LauncherApp:
                 self.apps_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
             else:
                 self.apps_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
+        if self.settings_button is not None:
+            if active_path == "settings":
+                self.settings_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
+            else:
+                self.settings_button.configure(fg_color="transparent", text_color=SIDEBAR_TEXT_MUTED)
         for path, btn in self._nav_buttons.items():
             if path == active_path:
                 btn.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
@@ -894,13 +1097,13 @@ class LauncherApp:
             corner_radius=10,
             fg_color=TEXT_DARK,
             text_color="white",
-            font=(FONT_FAMILY, 15, "bold"),
+            font=F(15, "bold"),
         ).pack(side="left")
 
         ctk.CTkLabel(
             header,
             text=title,
-            font=(FONT_FAMILY, 16, "bold"),
+            font=F(16, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
             wraplength=420,
@@ -912,7 +1115,7 @@ class LauncherApp:
             ctk.CTkButton(
                 header,
                 text=text,
-                font=(FONT_FAMILY, 11),
+                font=F(11),
                 fg_color="transparent",
                 hover_color=TEXT_DARK,
                 text_color=ACCENT,
@@ -933,14 +1136,20 @@ class LauncherApp:
         scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
         scroll.pack(fill="both", expand=True, padx=32, pady=28)
 
-        logo_holder = ctk.CTkFrame(scroll, fg_color=BODY_BG)
+        # Wrapped in its own small white tile (WHITE_BACKDROP, corner_radius)
+        # rather than sitting directly on BODY_BG, so the logo stays legible
+        # in Dark/Eye Comfort mode too — in the Light theme it's white on
+        # white and looks identical to before.
+        logo_holder = ctk.CTkFrame(scroll, fg_color=WHITE_BACKDROP, corner_radius=12)
         logo_holder.pack(anchor="w", pady=(0, 16))
-        self._render_logo(logo_holder, self._welcome_logo, 64)
+        logo_inner = ctk.CTkFrame(logo_holder, fg_color=WHITE_BACKDROP)
+        logo_inner.pack(padx=14, pady=14)
+        self._render_logo(logo_inner, self._welcome_logo, 64)
 
         ctk.CTkLabel(
             scroll,
             text="Welcome to The Center Office Application",
-            font=(FONT_FAMILY, 19, "bold"),
+            font=F(19, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
             wraplength=560,
@@ -951,14 +1160,14 @@ class LauncherApp:
             ctk.CTkLabel(
                 scroll,
                 text=heading,
-                font=(FONT_FAMILY, 13, "bold"),
+                font=F(13, "bold"),
                 text_color=TEXT_DARK,
                 fg_color=BODY_BG,
             ).pack(anchor="w", pady=(14, 4))
             ctk.CTkLabel(
                 scroll,
                 text=body,
-                font=(FONT_FAMILY, 12),
+                font=F(12),
                 text_color=TEXT_MUTED,
                 fg_color=BODY_BG,
                 wraplength=560,
@@ -1001,8 +1210,10 @@ class LauncherApp:
             "in Search (or click 🔍) to look for a word anywhere — page "
             "names, titles, and the text inside every guide and app, not "
             "just what's listed in the sidebar — or use the ⟨ arrow at "
-            "the top of the sidebar to collapse it out of the way. "
-            "Questions? Contact your office administrator.",
+            "the top of the sidebar to collapse it out of the way. Visit "
+            "Settings (bottom of the sidebar) to switch to a dark or "
+            "eye-comfort theme, or change the text size. Questions? "
+            "Contact your office administrator.",
         )
 
     def _show_apps(self):
@@ -1021,14 +1232,14 @@ class LauncherApp:
         ctk.CTkLabel(
             scroll,
             text="Apps",
-            font=(FONT_FAMILY, 19, "bold"),
+            font=F(19, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
         ).pack(anchor="w")
         ctk.CTkLabel(
             scroll,
             text="Interactive tools that open in their own window, with full JavaScript support.",
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
         ).pack(anchor="w", pady=(2, 18))
@@ -1039,7 +1250,7 @@ class LauncherApp:
             ctk.CTkLabel(
                 scroll,
                 text="No interactive tools yet. Drop an .html file with a <script> tag into the html folder and click Refresh.",
-                font=(FONT_FAMILY, 12),
+                font=F(12),
                 text_color=TEXT_MUTED,
                 fg_color=BODY_BG,
                 wraplength=520,
@@ -1062,7 +1273,7 @@ class LauncherApp:
                 corner_radius=10,
                 fg_color=TEXT_DARK,
                 text_color="white",
-                font=(FONT_FAMILY, 15, "bold"),
+                font=F(15, "bold"),
             ).pack(side="left")
 
             text_holder = ctk.CTkFrame(row, fg_color=CARD_BG)
@@ -1070,7 +1281,7 @@ class LauncherApp:
             ctk.CTkLabel(
                 text_holder,
                 text=title,
-                font=(FONT_FAMILY, 14, "bold"),
+                font=F(14, "bold"),
                 text_color=TEXT_DARK,
                 fg_color=CARD_BG,
                 anchor="w",
@@ -1078,7 +1289,7 @@ class LauncherApp:
             ctk.CTkLabel(
                 text_holder,
                 text="Interactive tool — opens in its own window.",
-                font=(FONT_FAMILY, 11),
+                font=F(11),
                 text_color=TEXT_MUTED,
                 fg_color=CARD_BG,
                 anchor="w",
@@ -1087,7 +1298,7 @@ class LauncherApp:
             ctk.CTkButton(
                 row,
                 text="Open Tool" if webview is not None else "Open in Browser",
-                font=(FONT_FAMILY, 12, "bold"),
+                font=F(12, "bold"),
                 fg_color=ACCENT,
                 hover_color=TEXT_DARK,
                 text_color="white",
@@ -1096,6 +1307,148 @@ class LauncherApp:
                 width=120,
                 command=lambda p=path, t=title: self._open_program(p, t),
             ).pack(side="right")
+
+    def _show_settings(self):
+        """Personal display preferences, saved to settings.json next to
+        html/ and assets/ so they persist between launches. Every change
+        here applies immediately (no Save button) and triggers a full
+        UI rebuild — see _rebuild_ui — since CustomTkinter widgets don't
+        pick up new colors/fonts on their own once built."""
+        self._selected_path = "settings"
+        self._clear_content()
+        self._highlight_nav("settings")
+
+        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll.pack(fill="both", expand=True, padx=32, pady=28)
+
+        ctk.CTkLabel(
+            scroll, text="Settings", font=F(19, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            scroll,
+            text="Personal display preferences, saved on this computer.",
+            font=F(12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+        ).pack(anchor="w", pady=(2, 22))
+
+        def section(heading, subtext=None):
+            ctk.CTkLabel(
+                scroll, text=heading, font=F(13, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG
+            ).pack(anchor="w", pady=(18, 2))
+            if subtext:
+                ctk.CTkLabel(
+                    scroll,
+                    text=subtext,
+                    font=F(11),
+                    text_color=TEXT_MUTED,
+                    fg_color=BODY_BG,
+                    wraplength=560,
+                    justify="left",
+                ).pack(anchor="w")
+
+        def apply_and_rebuild(key, value):
+            self.settings[key] = value
+            save_settings(self.settings)
+            if key == "theme":
+                apply_theme(value)
+                ctk.set_appearance_mode(resolve_theme(value))
+            elif key == "font_scale":
+                apply_font_scale(value)
+            elif key == "remember_username" and not value:
+                self.settings["last_username"] = ""
+                save_settings(self.settings)
+            self._rebuild_ui()
+
+        section(
+            "Appearance",
+            "Choose a color theme, or follow your system's setting. The sidebar "
+            "stays navy in every theme — only the main pages change.",
+        )
+        self._settings_choice_row(
+            scroll,
+            [(k, THEME_LABELS[k]) for k in ("light", "dark", "eye_comfort", "system")],
+            self.settings.get("theme", "light"),
+            lambda v: apply_and_rebuild("theme", v),
+        )
+
+        section("Text Size", "Scales text and buttons throughout the app.")
+        self._settings_choice_row(
+            scroll,
+            [(k, FONT_SCALE_LABELS[k]) for k in ("small", "normal", "large", "xlarge")],
+            self.settings.get("font_scale", "normal"),
+            lambda v: apply_and_rebuild("font_scale", v),
+        )
+
+        section("Startup Page", "Which page shows right after you log in.")
+        self._settings_choice_row(
+            scroll,
+            [("home", "Home"), ("apps", "Apps")],
+            self.settings.get("default_page", "home"),
+            lambda v: apply_and_rebuild("default_page", v),
+        )
+
+        section("Login", "Whether your username is remembered for next time — never your password.")
+        self._settings_choice_row(
+            scroll,
+            [(True, "Remember my username"), (False, "Don't remember")],
+            self.settings.get("remember_username", True),
+            lambda v: apply_and_rebuild("remember_username", v),
+        )
+
+        reset_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
+        reset_row.pack(anchor="w", pady=(30, 0))
+        ctk.CTkButton(
+            reset_row,
+            text="Reset to Defaults",
+            font=F(12, "bold"),
+            fg_color="transparent",
+            hover_color=BORDER,
+            text_color=TEXT_MUTED,
+            border_width=1,
+            border_color=BORDER,
+            corner_radius=8,
+            height=34,
+            command=self._reset_settings,
+        ).pack(anchor="w")
+
+    def _settings_choice_row(self, parent, options, current_value, on_select):
+        """One row of segmented-style buttons for a single setting — the
+        option matching current_value is filled in accent color, the
+        rest are outlined. `options` is a list of (value, label) pairs;
+        `on_select(value)` runs when a non-active option is clicked."""
+        row = ctk.CTkFrame(parent, fg_color=BODY_BG)
+        row.pack(anchor="w", pady=(6, 0))
+        for value, label in options:
+            active = value == current_value
+            ctk.CTkButton(
+                row,
+                text=label,
+                font=F(12, "bold" if active else None),
+                fg_color=ACCENT if active else CARD_BG,
+                hover_color=TEXT_DARK if active else BORDER,
+                text_color="white" if active else TEXT_DARK,
+                border_width=0 if active else 1,
+                border_color=BORDER,
+                corner_radius=8,
+                height=34,
+                command=lambda v=value: on_select(v),
+            ).pack(side="left", padx=(0, 8), pady=(0, 8))
+
+    def _reset_settings(self):
+        """Restores every display preference to its default — except the
+        remembered username, which isn't really a "display" preference
+        and shouldn't quietly disappear just because someone reset the
+        theme back to Light."""
+        keep_username = self.settings.get("last_username", "")
+        self.settings = dict(DEFAULT_SETTINGS)
+        self.settings["last_username"] = keep_username
+        save_settings(self.settings)
+        apply_theme(self.settings["theme"])
+        ctk.set_appearance_mode(resolve_theme(self.settings["theme"]))
+        apply_font_scale(self.settings["font_scale"])
+        self._sidebar_expanded = self.settings["sidebar_expanded"]
+        self._rebuild_ui()
 
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
@@ -1114,7 +1467,7 @@ class LauncherApp:
             ctk.CTkLabel(
                 viewer_card,
                 text="This document couldn't be displayed in the app.\nUse \"Open in Browser\" above instead.",
-                font=(FONT_FAMILY, 12),
+                font=F(12),
                 text_color=TEXT_MUTED,
                 fg_color=CARD_BG,
                 justify="center",
@@ -1131,14 +1484,14 @@ class LauncherApp:
         ctk.CTkLabel(
             wrap,
             text="Opened in your default browser.",
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
         ).pack()
         ctk.CTkButton(
             wrap,
             text="Open Again",
-            font=(FONT_FAMILY, 12, "bold"),
+            font=F(12, "bold"),
             fg_color=ACCENT,
             hover_color=TEXT_DARK,
             text_color="white",
@@ -1157,7 +1510,7 @@ class LauncherApp:
         ctk.CTkLabel(
             wrap,
             text=title,
-            font=(FONT_FAMILY, 16, "bold"),
+            font=F(16, "bold"),
             text_color=TEXT_DARK,
             fg_color=BODY_BG,
         ).pack()
@@ -1165,7 +1518,7 @@ class LauncherApp:
         ctk.CTkLabel(
             wrap,
             text=f"This is an interactive tool that needs a real browser\nengine to run — it opens in its own {button_word}.",
-            font=(FONT_FAMILY, 12),
+            font=F(12),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
             justify="center",
@@ -1173,7 +1526,7 @@ class LauncherApp:
         ctk.CTkButton(
             wrap,
             text="Open Tool" if webview is not None else "Open in Browser",
-            font=(FONT_FAMILY, 13, "bold"),
+            font=F(13, "bold"),
             fg_color=ACCENT,
             hover_color=TEXT_DARK,
             text_color="white",
@@ -1199,7 +1552,10 @@ class LauncherApp:
             "use the ⟨ arrow at the top of the sidebar to collapse it out "
             "of the way.\n"
             "5. If you don't see a document you expect, ask an admin to add it "
-            "to the html folder, then click Refresh.\n\n"
+            "to the html folder, then click Refresh.\n"
+            "6. Click Settings (bottom of the sidebar) to change the color "
+            "theme, text size, startup page, or whether your username is "
+            "remembered on this computer.\n\n"
             "Having trouble? Contact your office administrator.",
         )
 
