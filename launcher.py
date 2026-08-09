@@ -427,7 +427,18 @@ class LauncherApp:
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
         self._login_logo = load_logo_image(LOGIN_LOGO_HEIGHT)
 
-        ctk.set_appearance_mode(resolve_theme(self.settings.get("theme", "light")))
+        # Deliberately always "light" here, regardless of the chosen theme.
+        # Every color in this app is one of our own plain hex strings
+        # (BODY_BG, CARD_BG, TEXT_DARK, ...), and CTk only re-maps colors
+        # given as a (light, dark) tuple when this global mode changes —
+        # a plain string is returned as-is either way. Actually flipping
+        # this to "dark" only affects CustomTkinter's own un-overridden
+        # internals (e.g. default scrollbar colors), which caused a real
+        # bug: switching to Dark mode made scrollbars/entries fall back to
+        # CTk's built-in dark theme colors we don't control, blacking out
+        # and hiding parts of the UI. Our own apply_theme() already does
+        # 100% of the real re-theming work safely.
+        ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
         root.title(WINDOW_TITLE)
@@ -479,6 +490,9 @@ class LauncherApp:
             height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
             width=LOGIN_FIELD_WIDTH,
+            fg_color=WHITE_BACKDROP,
+            border_color=LOGIN_BORDER,
+            text_color=LOGIN_TEXT,
         )
         username_entry.pack(pady=(0, 8))
 
@@ -497,6 +511,9 @@ class LauncherApp:
             height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
             width=LOGIN_FIELD_WIDTH - LOGIN_BUTTON_WIDTH - LOGIN_FIELD_GAP,
+            fg_color=WHITE_BACKDROP,
+            border_color=LOGIN_BORDER,
+            text_color=LOGIN_TEXT,
         )
         password_entry.pack(side="left", padx=(0, LOGIN_FIELD_GAP))
 
@@ -747,7 +764,11 @@ class LauncherApp:
         )
         self.apps_button.pack(fill="x")
 
-        self.nav_scroll = ctk.CTkScrollableFrame(self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0)
+        self.nav_scroll = ctk.CTkScrollableFrame(
+            self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0,
+            scrollbar_fg_color=SIDEBAR_BG, scrollbar_button_color=SIDEBAR_HOVER,
+            scrollbar_button_hover_color=SIDEBAR_BUTTON_HOVER,
+        )
         self.nav_scroll.pack(fill="both", expand=True, padx=6)
 
         self._build_sidebar_footer(self.sidebar_content)
@@ -937,7 +958,11 @@ class LauncherApp:
         doc_matches = self._search_documents(query_l)
         total = len(page_matches) + len(doc_matches)
 
-        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll = ctk.CTkScrollableFrame(
+            self.content_frame, fg_color=BODY_BG, corner_radius=0,
+            scrollbar_fg_color=BODY_BG, scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=TEXT_MUTED,
+        )
         scroll.pack(fill="both", expand=True, padx=32, pady=28)
 
         ctk.CTkLabel(
@@ -1133,7 +1158,11 @@ class LauncherApp:
         self._clear_content()
         self._highlight_nav(None)
 
-        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll = ctk.CTkScrollableFrame(
+            self.content_frame, fg_color=BODY_BG, corner_radius=0,
+            scrollbar_fg_color=BODY_BG, scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=TEXT_MUTED,
+        )
         scroll.pack(fill="both", expand=True, padx=32, pady=28)
 
         # Wrapped in its own small white tile (WHITE_BACKDROP, corner_radius)
@@ -1226,7 +1255,11 @@ class LauncherApp:
         self._clear_content()
         self._highlight_nav("apps")
 
-        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll = ctk.CTkScrollableFrame(
+            self.content_frame, fg_color=BODY_BG, corner_radius=0,
+            scrollbar_fg_color=BODY_BG, scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=TEXT_MUTED,
+        )
         scroll.pack(fill="both", expand=True, padx=32, pady=28)
 
         ctk.CTkLabel(
@@ -1318,7 +1351,11 @@ class LauncherApp:
         self._clear_content()
         self._highlight_nav("settings")
 
-        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll = ctk.CTkScrollableFrame(
+            self.content_frame, fg_color=BODY_BG, corner_radius=0,
+            scrollbar_fg_color=BODY_BG, scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=TEXT_MUTED,
+        )
         scroll.pack(fill="both", expand=True, padx=32, pady=28)
 
         ctk.CTkLabel(
@@ -1352,7 +1389,6 @@ class LauncherApp:
             save_settings(self.settings)
             if key == "theme":
                 apply_theme(value)
-                ctk.set_appearance_mode(resolve_theme(value))
             elif key == "font_scale":
                 apply_font_scale(value)
             elif key == "remember_username" and not value:
@@ -1445,7 +1481,6 @@ class LauncherApp:
         self.settings["last_username"] = keep_username
         save_settings(self.settings)
         apply_theme(self.settings["theme"])
-        ctk.set_appearance_mode(resolve_theme(self.settings["theme"]))
         apply_font_scale(self.settings["font_scale"])
         self._sidebar_expanded = self.settings["sidebar_expanded"]
         self._rebuild_ui()
