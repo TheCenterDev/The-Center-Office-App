@@ -85,6 +85,36 @@ except ImportError:
     )
     sys.exit(1)
 
+# ---- patch a real CustomTkinter bug: scrolling over a guide page crashes.
+# The sidebar's scrollable list (nav_scroll) registers its mouse-wheel
+# listener globally (bind_all), which is how CustomTkinter makes "scroll
+# anywhere over this list" work -- but that means it also fires when the
+# mouse is over completely unrelated widgets, like the guide viewer (which
+# uses the separate tkinterweb library to render HTML, not CustomTkinter).
+# CustomTkinter's handler then walks up the widget tree to check whether
+# what's under the mouse belongs to it, assuming every step is a normal
+# Tkinter widget -- but tkinterweb's internal widgets don't fit that
+# assumption, so partway up the walk it hits something that isn't a
+# widget at all and crashes with "AttributeError: 'str' object has no
+# attribute 'master'". This is confirmed via the app's own error_log.txt
+# and reproduces every time by scrolling on a guide page (e.g. "How the
+# Office Works"), independent of themes or rebuilds. Since this is a bug
+# in CustomTkinter's own code and not something we can fix by changing
+# our layout, patch the one unsafe line so it treats an unrecognized
+# widget as "not part of this scrollable list" instead of crashing.
+try:
+    _original_check_if_valid_scroll = ctk.CTkScrollableFrame._check_if_valid_scroll
+
+    def _safe_check_if_valid_scroll(self, widget):
+        try:
+            return _original_check_if_valid_scroll(self, widget)
+        except AttributeError:
+            return False
+
+    ctk.CTkScrollableFrame._check_if_valid_scroll = _safe_check_if_valid_scroll
+except Exception:
+    pass
+
 try:
     from PIL import Image
 except ImportError:
