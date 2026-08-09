@@ -138,6 +138,20 @@ WELCOME_LOGO_HEIGHT = 72  # px tall on the welcome screen (bigger, roomier)
 # time in the general document list.
 SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 
+LOGIN_LOGO_HEIGHT = 88  # px tall on the login screen
+# How far above dead-center the logo sits on the login screen, in pixels.
+# The login card itself stays at the true window center (relx/rely 0.5,
+# anchor "center", no offset) — only the logo is pushed up from there —
+# so the card's position never depends on the logo's size.
+LOGIN_LOGO_OFFSET_Y = -150
+
+# No real email/accounts system yet — these two hardcoded logins are a
+# placeholder gate until The Center wants real per-person accounts.
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "TH3Center1"
+STAFF_USERNAME = "staff"
+STAFF_PASSWORD = "Center123"
+
 
 def get_base_dir() -> Path:
     """Folder used to find html/ and assets/ — kept separate from any
@@ -250,8 +264,10 @@ class LauncherApp:
         self._sidebar_expanded = True
         self.home_button = None
         self.apps_button = None
+        self.user_role = None  # "admin" or "staff" once logged in
         self._sidebar_logo = load_logo_image(LOGO_HEIGHT)
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
+        self._login_logo = load_logo_image(LOGIN_LOGO_HEIGHT)
 
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
@@ -261,8 +277,97 @@ class LauncherApp:
         root.minsize(860, 520)
         root.configure(fg_color=BODY_BG)
 
-        self._build_layout()
-        self.refresh_documents()
+        self._show_login_screen()
+
+    # ------------------------------------------------------------ login --
+    def _show_login_screen(self):
+        """Blank white gate shown on launch, before any app content builds.
+        The login card sits at the window's true center (place() with
+        relx/rely 0.5, anchor "center", no offset); the logo is pushed up
+        from that same center point independently, so the card's position
+        never shifts based on the logo's size."""
+        self.login_screen = ctk.CTkFrame(self.root, fg_color=BODY_BG, corner_radius=0)
+        self.login_screen.pack(fill="both", expand=True)
+
+        logo_holder = ctk.CTkFrame(self.login_screen, fg_color=BODY_BG)
+        self._render_logo(logo_holder, self._login_logo, 72, anchor="center")
+        logo_holder.place(relx=0.5, rely=0.5, anchor="center", y=LOGIN_LOGO_OFFSET_Y)
+
+        card = ctk.CTkFrame(
+            self.login_screen, fg_color=CARD_BG, corner_radius=16, border_width=1, border_color=BORDER
+        )
+        card.place(relx=0.5, rely=0.5, anchor="center")
+
+        inner = ctk.CTkFrame(card, fg_color=CARD_BG)
+        inner.pack(padx=36, pady=32)
+
+        ctk.CTkLabel(
+            inner, text="Sign In", font=(FONT_FAMILY, 18, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
+        ).pack(pady=(0, 20))
+
+        username_var = StringVar()
+        password_var = StringVar()
+        error_var = StringVar()
+
+        username_entry = ctk.CTkEntry(
+            inner,
+            textvariable=username_var,
+            placeholder_text="Username",
+            font=(FONT_FAMILY, 12),
+            height=38,
+            corner_radius=8,
+            width=240,
+        )
+        username_entry.pack(pady=(0, 10))
+
+        password_entry = ctk.CTkEntry(
+            inner,
+            textvariable=password_var,
+            placeholder_text="Password",
+            show="•",
+            font=(FONT_FAMILY, 12),
+            height=38,
+            corner_radius=8,
+            width=240,
+        )
+        password_entry.pack(pady=(0, 6))
+
+        ctk.CTkLabel(
+            inner, textvariable=error_var, font=(FONT_FAMILY, 11), text_color="#c0392b", fg_color=CARD_BG
+        ).pack(pady=(0, 4))
+
+        def attempt_login(*_event):
+            username = username_var.get().strip().lower()
+            password = password_var.get()
+            if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+                role = "admin"
+            elif username == STAFF_USERNAME and password == STAFF_PASSWORD:
+                role = "staff"
+            else:
+                error_var.set("Incorrect username or password.")
+                password_var.set("")
+                return
+            self.user_role = role
+            self.root.unbind("<Return>")
+            self.login_screen.destroy()
+            self._build_layout()
+            self.refresh_documents()
+
+        ctk.CTkButton(
+            inner,
+            text="Log In",
+            font=(FONT_FAMILY, 13, "bold"),
+            fg_color=ACCENT,
+            hover_color=TEXT_DARK,
+            text_color="white",
+            corner_radius=10,
+            height=40,
+            width=240,
+            command=attempt_login,
+        ).pack(pady=(10, 0))
+
+        self.root.bind("<Return>", attempt_login)
+        username_entry.focus_set()
 
     # ----------------------------------------------------------- layout --
     def _build_layout(self):
@@ -310,13 +415,13 @@ class LauncherApp:
         header.pack(fill="x")
         header_inner = ctk.CTkFrame(header, fg_color=BODY_BG)
         header_inner.pack(padx=18, pady=18)
-        self._render_logo(header_inner, self._sidebar_logo, LOGO_SIZE)
+        self._render_logo(header_inner, self._sidebar_logo, LOGO_SIZE, anchor="center")
         ctk.CTkLabel(
             header_inner, text=APP_NAME, font=(FONT_FAMILY, 14, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG
-        ).pack(anchor="w", pady=(8, 0))
+        ).pack(anchor="center", pady=(8, 0))
         ctk.CTkLabel(
             header_inner, text=APP_TAGLINE, font=(FONT_FAMILY, 10), text_color=ACCENT, fg_color=BODY_BG
-        ).pack(anchor="w")
+        ).pack(anchor="center")
 
         ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
 
@@ -412,12 +517,15 @@ class LauncherApp:
         footer_button("How to Use This Launcher", self.show_help).pack(fill="x", pady=1)
         footer_button("Quit", self.root.destroy).pack(fill="x", pady=1)
 
-    def _render_logo(self, parent, logo_image, placeholder_size):
+    def _render_logo(self, parent, logo_image, placeholder_size, anchor="w"):
         """Show a real logo if assets/logo.* exists, otherwise a clean
         rounded placeholder mark so the app still looks finished today.
-        Always drawn on a white background — see load_logo_image."""
+        Always drawn on a white background — see load_logo_image.
+        `anchor` controls horizontal alignment within `parent`: "w" for
+        the left-aligned Home-page usage, "center" for the sidebar header
+        and login screen, where the logo should sit dead-center."""
         if logo_image is not None:
-            ctk.CTkLabel(parent, image=logo_image, text="", fg_color=BODY_BG).pack(anchor="w")
+            ctk.CTkLabel(parent, image=logo_image, text="", fg_color=BODY_BG).pack(anchor=anchor)
             return
 
         ctk.CTkLabel(
@@ -429,7 +537,7 @@ class LauncherApp:
             fg_color=ACCENT,
             text_color="white",
             font=(FONT_FAMILY, int(placeholder_size * 0.4), "bold"),
-        ).pack(anchor="w")
+        ).pack(anchor=anchor)
 
     # --------------------------------------------------------- behavior --
     def refresh_documents(self):
