@@ -546,7 +546,12 @@ class LauncherApp:
             corner_radius=8,
             height=LOGIN_FIELD_HEIGHT,
             width=LOGIN_BUTTON_WIDTH,
-            command=attempt_login,
+            # Deferred (see the fix/comment on _show_settings's
+            # apply_and_rebuild) since attempt_login destroys
+            # login_screen, this button's own ancestor. The <Return>
+            # binding below calls attempt_login directly since a root-
+            # level key binding doesn't have this hazard.
+            command=lambda: self.root.after(1, attempt_login),
         ).pack(side="left")
 
         ctk.CTkLabel(
@@ -1021,6 +1026,13 @@ class LauncherApp:
                     wraplength=560,
                 ).pack(fill="x", pady=(6, 10))
 
+            # Deferred via after() rather than calling on_click directly:
+            # it clears content_frame, which is this button's own
+            # ancestor. Destroying a widget tree synchronously from
+            # inside one of its own buttons' click handlers is a classic
+            # Tk hazard (the button still has post-click bookkeeping to
+            # do on itself once this callback returns) -- see the same
+            # fix/comment in _show_settings's apply_and_rebuild.
             ctk.CTkButton(
                 row,
                 text="Open",
@@ -1031,7 +1043,7 @@ class LauncherApp:
                 corner_radius=8,
                 height=30,
                 width=90,
-                command=on_click,
+                command=lambda cb=on_click: self.root.after(1, cb),
             ).pack(anchor="e")
 
         for title, snippet, action in page_matches:
@@ -1394,7 +1406,16 @@ class LauncherApp:
             elif key == "remember_username" and not value:
                 self.settings["last_username"] = ""
                 save_settings(self.settings)
-            self._rebuild_ui()
+            # Deferred to the next idle tick rather than called directly:
+            # _rebuild_ui() destroys the entire sidebar + content pane,
+            # including the very button whose click got us here. Tearing
+            # that down synchronously from inside the button's own click
+            # handler is a classic Tk hazard -- CTkButton still has
+            # post-click bookkeeping to do on itself once this callback
+            # returns, and that blows up if it (and everything around it)
+            # is already gone, which was exactly what made Eye Comfort
+            # (and presumably Dark too) look like a frozen black screen.
+            self.root.after(1, self._rebuild_ui)
 
         section(
             "Appearance",
@@ -1483,7 +1504,11 @@ class LauncherApp:
         apply_theme(self.settings["theme"])
         apply_font_scale(self.settings["font_scale"])
         self._sidebar_expanded = self.settings["sidebar_expanded"]
-        self._rebuild_ui()
+        # See the comment in _show_settings's apply_and_rebuild — deferred
+        # for the same reason: this button (and everything around it) is
+        # about to be destroyed by _rebuild_ui, which must not happen
+        # synchronously inside its own click handler.
+        self.root.after(1, self._rebuild_ui)
 
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
