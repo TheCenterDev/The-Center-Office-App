@@ -64,6 +64,7 @@ as a standalone Windows .exe or Mac .app that colleagues can run
 without installing Python.
 """
 
+import html
 import re
 import subprocess
 import sys
@@ -125,6 +126,10 @@ FONT_FAMILY = "Segoe UI"
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 ORDER_PREFIX_RE = re.compile(r"^\d+[\s_.\-]+")
 SCRIPT_TAG_RE = re.compile(r"<script\b", re.IGNORECASE)
+SCRIPT_STYLE_BLOCK_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+HTML_TAG_RE = re.compile(r"<[^>]+>")
+WHITESPACE_RE = re.compile(r"\s+")
+SEARCH_SNIPPET_RADIUS = 70  # chars of context shown before/after a match
 
 LOGO_SIZE = 44  # px, square — used only for the placeholder mark when no
                 # real logo file is present
@@ -206,6 +211,22 @@ def read_title(path: Path) -> str:
     except OSError:
         pass
     return display_name_from_filename(path.name)
+
+
+def extract_plain_text(path: Path) -> str:
+    """Best-effort plain-text extraction from an HTML document, used for
+    full-text search. Strips <script>/<style> blocks first (so JS/CSS
+    source code doesn't show up in search results or match a query by
+    accident), then every remaining tag, then unescapes HTML entities
+    and collapses whitespace down to single spaces."""
+    try:
+        raw = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+    raw = SCRIPT_STYLE_BLOCK_RE.sub(" ", raw)
+    text = HTML_TAG_RE.sub(" ", raw)
+    text = html.unescape(text)
+    return WHITESPACE_RE.sub(" ", text).strip()
 
 
 def is_interactive_program(path: Path) -> bool:
@@ -484,11 +505,14 @@ class LauncherApp:
             fill="x", padx=6, pady=(6, 0)
         )
 
+        # Search doesn't filter this sidebar list live — it jumps to a
+        # dedicated Search Results page (Enter or the 🔍 button) that
+        # looks everywhere: page names, document titles, and the full
+        # text inside every guide and app, not just what's listed here.
         search_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
         search_row.pack(fill="x", padx=12, pady=12)
         self.search_var = StringVar()
-        self.search_var.trace_add("write", lambda *_: self._apply_filter())
-        ctk.CTkEntry(
+        self.search_entry = ctk.CTkEntry(
             search_row,
             textvariable=self.search_var,
             placeholder_text="Search…",
@@ -499,7 +523,21 @@ class LauncherApp:
             border_color=SIDEBAR_DIVIDER,
             text_color=SIDEBAR_TEXT,
             placeholder_text_color=SIDEBAR_TEXT_MUTED,
-        ).pack(fill="x")
+        )
+        self.search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry.bind("<Return>", lambda _e: self._perform_search())
+        ctk.CTkButton(
+            search_row,
+            text="🔍",
+            width=32,
+            height=32,
+            corner_radius=8,
+            fg_color=SIDEBAR_HOVER,
+            hover_color=ACCENT,
+            text_color=SIDEBAR_TEXT,
+            font=(FONT_FAMILY, 12),
+            command=self._perform_search,
+        ).pack(side="left", padx=(6, 0))
 
         apps_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
         apps_row.pack(fill="x", padx=6, pady=(0, 4))
@@ -581,37 +619,29 @@ class LauncherApp:
     # --------------------------------------------------------- behavior --
     def refresh_documents(self):
         self.documents = discover_documents()
-        self._apply_filter()
+        self._render_nav_list()
         if self._selected_path == "apps":
             self._show_apps()
 
-    def _apply_filter(self):
-        # Interactive tools have their own dedicated "Apps" page, and some
-        # guides (currently just the welcome guide) are superseded by the
-        # pinned "Home" page — both are left out of this general list so
-        # they aren't shown twice, though the files themselves still exist
-        # and Apps still pulls tools straight from self.documents.
-        nav_docs = [
+    def _render_nav_list(self):
+        """Populates the sidebar's document list. Always shows every
+        guide/app (minus the ones superseded by a pinned page — see
+        SIDEBAR_HIDDEN_FILES); no longer affected by the search box,
+        which now jumps to a dedicated Search Results page instead of
+        filtering this list — see _perform_search."""
+        self.filtered = [
             d for d in self.documents
             if not d[3] and d[2].name.lower() not in SIDEBAR_HIDDEN_FILES
         ]
-
-        query = self.search_var.get().strip().lower()
-        self.filtered = [d for d in nav_docs if query in d[1].lower()] if query else nav_docs
 
         for widget in self.nav_scroll.winfo_children():
             widget.destroy()
         self._nav_buttons = {}
 
         if not self.filtered:
-            message = (
-                "No documents match your search."
-                if query
-                else f"No documents found yet.\nAdd .html files to:\n{HTML_DIR}"
-            )
             ctk.CTkLabel(
                 self.nav_scroll,
-                text=message,
+                text=f"No documents found yet.\nAdd .html files to:\n{HTML_DIR}",
                 font=(FONT_FAMILY, 11),
                 text_color=SIDEBAR_TEXT_MUTED,
                 fg_color=SIDEBAR_BG,
@@ -638,6 +668,140 @@ class LauncherApp:
             self._nav_buttons[path] = btn
 
         self._highlight_nav(self._selected_path)
+
+    # ---------------------------------------------------------- search --
+    def _perform_search(self):
+        query = self.search_var.get().strip()
+        if query:
+            self._show_search_results(query)
+
+    def _search_pages(self, query_l: str):
+        """Matches against the pinned Home/Apps pages by name, so
+        searching "apps" finds the Apps page itself, not just documents
+        that happen to have "apps" in their title or text."""
+        pages = [
+            ("Home", "Welcome overview — what this app is for, using guides and apps, and Claude Skills.", self._show_home),
+            ("Apps", "Dedicated list of every interactive tool in this app.", self._show_apps),
+        ]
+        return [(title, snippet, action) for title, snippet, action in pages if query_l in title.lower()]
+
+    def _search_documents(self, query_l: str):
+        """Matches against every known document — including ones hidden
+        from the general sidebar list (SIDEBAR_HIDDEN_FILES) or shown
+        only on the Apps page — checking both the title and the full
+        text inside the file, not just what's visible in the sidebar."""
+        results = []
+        for _key, title, path, is_program in self.documents:
+            snippet = None
+            if query_l in title.lower():
+                snippet = "Match in the title."
+
+            text = extract_plain_text(path)
+            idx = text.lower().find(query_l)
+            if idx != -1:
+                start = max(0, idx - SEARCH_SNIPPET_RADIUS)
+                end = min(len(text), idx + len(query_l) + SEARCH_SNIPPET_RADIUS)
+                snippet = ("…" if start > 0 else "") + text[start:end].strip() + ("…" if end < len(text) else "")
+
+            if snippet is not None:
+                results.append((title, path, is_program, snippet))
+        return results
+
+    def _show_search_results(self, query: str):
+        """Dedicated Search Results page — looks everywhere (pinned page
+        names, every document's title, and every document's full text),
+        not just the currently-visible sidebar list."""
+        self._selected_path = "search"
+        self._clear_content()
+        self._highlight_nav("search")
+
+        query_l = query.lower()
+        page_matches = self._search_pages(query_l)
+        doc_matches = self._search_documents(query_l)
+        total = len(page_matches) + len(doc_matches)
+
+        scroll = ctk.CTkScrollableFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+        scroll.pack(fill="both", expand=True, padx=32, pady=28)
+
+        ctk.CTkLabel(
+            scroll,
+            text=f'Search results for "{query}"',
+            font=(FONT_FAMILY, 19, "bold"),
+            text_color=TEXT_DARK,
+            fg_color=BODY_BG,
+            wraplength=560,
+            justify="left",
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            scroll,
+            text=f"{total} match{'es' if total != 1 else ''} found across pages, guides, and apps.",
+            font=(FONT_FAMILY, 12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+        ).pack(anchor="w", pady=(2, 18))
+
+        if total == 0:
+            ctk.CTkLabel(
+                scroll,
+                text="No matches. Try a different word.",
+                font=(FONT_FAMILY, 12),
+                text_color=TEXT_MUTED,
+                fg_color=BODY_BG,
+            ).pack(anchor="w")
+            return
+
+        def result_card(title, kind_label, snippet, on_click):
+            card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
+            card.pack(fill="x", pady=6)
+            row = ctk.CTkFrame(card, fg_color=CARD_BG)
+            row.pack(fill="x", padx=18, pady=14)
+
+            top = ctk.CTkFrame(row, fg_color=CARD_BG)
+            top.pack(fill="x")
+            ctk.CTkLabel(
+                top, text=title, font=(FONT_FAMILY, 14, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG, anchor="w"
+            ).pack(side="left")
+            badge = ctk.CTkFrame(top, fg_color=ACCENT_SOFT, corner_radius=6)
+            badge.pack(side="right")
+            ctk.CTkLabel(
+                badge, text=kind_label, font=(FONT_FAMILY, 10, "bold"), text_color=ACCENT, fg_color=ACCENT_SOFT
+            ).pack(padx=8, pady=2)
+
+            if snippet:
+                ctk.CTkLabel(
+                    row,
+                    text=snippet,
+                    font=(FONT_FAMILY, 11),
+                    text_color=TEXT_MUTED,
+                    fg_color=CARD_BG,
+                    anchor="w",
+                    justify="left",
+                    wraplength=560,
+                ).pack(fill="x", pady=(6, 10))
+
+            ctk.CTkButton(
+                row,
+                text="Open",
+                font=(FONT_FAMILY, 11, "bold"),
+                fg_color=ACCENT,
+                hover_color=TEXT_DARK,
+                text_color="white",
+                corner_radius=8,
+                height=30,
+                width=90,
+                command=on_click,
+            ).pack(anchor="e")
+
+        for title, snippet, action in page_matches:
+            result_card(title, "PAGE", snippet, action)
+
+        for title, path, is_program, snippet in doc_matches:
+            result_card(
+                title,
+                "APP" if is_program else "GUIDE",
+                snippet,
+                lambda p=path, t=title, prog=is_program: self._select_document(p, t, prog),
+            )
 
     def _highlight_nav(self, active_path):
         if self.home_button is not None:
@@ -814,10 +978,12 @@ class LauncherApp:
         section(
             "Getting started",
             "New to the office? Start with the Welcome guide in the "
-            "sidebar, then browse the rest as you need them. Use Search to "
-            "find something quickly, or the ⟨ arrow at the top of the "
-            "sidebar to collapse it out of the way. Questions? Contact your "
-            "office administrator.",
+            "sidebar, then browse the rest as you need them. Press Enter "
+            "in Search (or click 🔍) to look for a word anywhere — page "
+            "names, titles, and the text inside every guide and app, not "
+            "just what's listed in the sidebar — or use the ⟨ arrow at "
+            "the top of the sidebar to collapse it out of the way. "
+            "Questions? Contact your office administrator.",
         )
 
     def _show_apps(self):
@@ -1009,8 +1175,10 @@ class LauncherApp:
             "3. Items marked with ↗ are interactive tools that need real "
             "JavaScript to run — they show an \"Open Tool\" button that opens "
             "a separate window for that tool.\n"
-            "4. Use Search to quickly find an item by name, or the ⟨ arrow "
-            "at the top of the sidebar to collapse it out of the way.\n"
+            "4. Press Enter in Search (or click 🔍) to see every match for "
+            "a word anywhere in the app — not just the sidebar list — or "
+            "use the ⟨ arrow at the top of the sidebar to collapse it out "
+            "of the way.\n"
             "5. If you don't see a document you expect, ask an admin to add it "
             "to the html folder, then click Refresh.\n\n"
             "Having trouble? Contact your office administrator.",
