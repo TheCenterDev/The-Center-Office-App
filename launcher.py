@@ -67,13 +67,15 @@ without installing Python.
 import html
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
 import traceback
+import urllib.parse
 import webbrowser
 from pathlib import Path
-from tkinter import StringVar, messagebox
+from tkinter import StringVar, filedialog, messagebox
 
 try:
     import customtkinter as ctk
@@ -1772,6 +1774,78 @@ class LauncherApp:
         # synchronously inside its own click handler.
         self.root.after(1, self._rebuild_ui)
 
+    def _resolve_local_download_path(self, url: str, base_dir: Path):
+        """If a clicked link inside a guide points at a local, downloadable
+        file (currently: anything under assets/skills/), resolve it to a
+        real filesystem Path. Returns None for ordinary page links (http,
+        https, or any other local file), which should navigate normally."""
+        try:
+            parsed = urllib.parse.urlparse(url)
+        except Exception:
+            return None
+        if parsed.scheme not in ("", "file"):
+            return None
+
+        raw_path = urllib.parse.unquote(parsed.path or url)
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = (base_dir / candidate).resolve()
+
+        if candidate.suffix.lower() in (".skill",) and candidate.exists():
+            return candidate
+        return None
+
+    def _download_skill_file(self, source_path: Path):
+        """Saves a packaged .skill file to a location the user picks, with
+        a brief animated "Downloading..." popup for feedback. Used instead
+        of a plain HTML download link: tkinterweb has no real download
+        mechanism, so clicking a link straight to the file just rendered
+        its raw zip bytes as garbled text instead of saving anything."""
+        dest = filedialog.asksaveasfilename(
+            title="Save Skill",
+            initialfile=source_path.name,
+            defaultextension=".skill",
+            filetypes=[("Claude Skill", "*.skill"), ("All files", "*.*")],
+        )
+        if not dest:
+            return
+
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Downloading")
+        popup.geometry("280x120")
+        popup.resizable(False, False)
+        popup.configure(fg_color=WHITE_BACKDROP)
+        popup.transient(self.root)
+        popup.grab_set()
+
+        ctk.CTkLabel(
+            popup,
+            text=f"Downloading {source_path.name}…",
+            font=F(12, "bold"),
+            text_color=LOGIN_TEXT,
+            fg_color=WHITE_BACKDROP,
+            wraplength=240,
+            justify="center",
+        ).pack(pady=(26, 14))
+        bar = ctk.CTkProgressBar(
+            popup, mode="indeterminate", width=200, progress_color=ACCENT, fg_color=LOGIN_ACCENT_SOFT
+        )
+        bar.pack()
+        bar.start()
+
+        def finish():
+            bar.stop()
+            try:
+                shutil.copyfile(source_path, dest)
+            except Exception as exc:
+                popup.destroy()
+                messagebox.showerror(WINDOW_TITLE, f"Couldn't save the file:\n{exc}")
+                return
+            popup.destroy()
+            messagebox.showinfo(WINDOW_TITLE, f"Saved to:\n{dest}")
+
+        popup.after(650, finish)
+
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
         self._content_header(title, extra_button=("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri())))
@@ -1782,7 +1856,16 @@ class LauncherApp:
         viewer_card.pack(fill="both", expand=True, padx=24, pady=(0, 20))
 
         try:
-            html_view = HtmlFrame(viewer_card, messages_enabled=False)
+            html_view = None
+
+            def handle_link_click(url):
+                skill_path = self._resolve_local_download_path(url, path.parent)
+                if skill_path is not None:
+                    self._download_skill_file(skill_path)
+                    return
+                html_view.load_url(url)
+
+            html_view = HtmlFrame(viewer_card, messages_enabled=False, on_link_click=handle_link_click)
             html_view.pack(fill="both", expand=True, padx=1, pady=1)
             html_view.load_file(str(path))
         except Exception:
