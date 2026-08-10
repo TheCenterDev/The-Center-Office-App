@@ -371,7 +371,7 @@ SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 SKILLS = [
     {
         "name": "Deposit Reconciliation",
-        "description": "Reconciles a QuickBooks bank deposit against a donor deposit-detail export, then compiles the organization's polished deposit-detail-and-summary PDF.",
+        "description": "Pulls all deposits and compares them side by side to catch any mismatches.",
         "prompts": [
             "Reconcile this deposit against QuickBooks.",
             "Here's the donor export and the QuickBooks deposit — do they match?",
@@ -381,7 +381,7 @@ SKILLS = [
     },
     {
         "name": "Financial Summary Email",
-        "description": "Drafts the monthly/YTD budget-vs-actual financial summary email for The Center for Whitley County Youth.",
+        "description": "Prepares a templated financial summary email for any given period.",
         "prompts": [
             "Draft this month's financials email.",
             "Compile the budget vs actual email with these QuickBooks numbers.",
@@ -1899,13 +1899,14 @@ class LauncherApp:
             skill_path = ASSETS_DIR / "skills" / skill["file"]
             ctk.CTkButton(
                 header_row,
-                text="Download Skill",
-                font=F(12, "bold"),
+                text="Download",
+                font=F(11, "bold"),
                 fg_color=ACCENT,
                 hover_color=TEXT_DARK,
                 text_color="white",
-                corner_radius=10,
-                height=32,
+                corner_radius=8,
+                width=80,
+                height=28,
                 command=lambda p=skill_path: self._download_skill_file(p),
             ).pack(side="right")
 
