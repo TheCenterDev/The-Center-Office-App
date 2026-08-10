@@ -10,6 +10,9 @@
   h3 { color: #1D2071; font-size: 14px; margin-top: 20px; margin-bottom: 6px; }
   p, li { color: #333a52; }
   .note { background: #e3f8ff; border-left: 4px solid #00C0F3; padding: 12px 16px; margin: 24px 0; font-size: 14px; color: #1D2071; }
+  .prompts { margin: 6px 0 10px; }
+  .prompts li { margin-bottom: 3px; }
+  .download { display: inline-block; margin-top: 4px; color: #00A3D1; font-weight: 600; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -21,6 +24,27 @@
   <p>Download the Expensify report and the Credit Union deposit PDF, then open the tool and follow the on-screen steps. It compares the two reports and matches them up for you automatically. From there, you're ready to finish the rest of the reconciliation.</p>
 
   <h2>Skills</h2>
+  <p>Skills are things Claude already knows how to do for this office — just tell Claude what you need in plain language, no app to open. To use one outside this launcher (in your own Claude or Cowork chat), download it below and attach the file to a conversation.</p>
+
+  <h3>Deposit Reconciliation</h3>
+  <p>Ask Claude to reconcile a bank deposit against the donor deposit-detail export, and it checks that the two actually match before doing anything else. Once they line up, it builds the polished Deposit Detail PDF the board is used to seeing — Checks/Total Deposit, Restricted vs. Unrestricted, and Payment Method breakdowns. If something's off, it stops and tells you exactly what doesn't match instead of guessing.</p>
+  <p><em>Try asking:</em></p>
+  <ul class="prompts">
+    <li>"Reconcile this deposit against QuickBooks."</li>
+    <li>"Here's the donor export and the QuickBooks deposit — do they match?"</li>
+    <li>"Put together the deposit detail PDF for this batch."</li>
+  </ul>
+  <a class="download" href="../assets/skills/deposit-reconciliation.skill" download>Download this Skill ⬇</a>
+
+  <h3>Financial Summary Email</h3>
+  <p>Ask Claude to draft the monthly or year-to-date budget-vs-actual financial summary email, and it fills in every one of the organization's income and expense categories — never skipping one, even if a number is missing for it. It'll check with you for a quick explanation on anything newly over budget before finishing the draft.</p>
+  <p><em>Try asking:</em></p>
+  <ul class="prompts">
+    <li>"Draft this month's financials email."</li>
+    <li>"Compile the budget vs actual email with these QuickBooks numbers."</li>
+    <li>"Write the monthly financial summary for the board."</li>
+  </ul>
+  <a class="download" href="../assets/skills/financial-summary-email.skill" download>Download this Skill ⬇</a>
 
   <div class="note">
     <strong>Editing this page:</strong> this file is <code>html/02_guides.html</code>. The "02_" prefix controls its order in the sidebar — rename or remove the prefix to reorder. Edit it directly and click <strong>Refresh</strong> in the app (or restart it) to see your changes.
