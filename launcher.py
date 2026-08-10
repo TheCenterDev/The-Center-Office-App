@@ -1512,6 +1512,18 @@ class LauncherApp:
         else:
             self._show_guide(title, path)
 
+    def _open_guides_page(self):
+        """Used by the Skills tab's 'See example prompts in Guides' link
+        to jump straight to the Guides document -- looked up by filename
+        rather than hardcoding a title, so renaming/re-ordering Guides
+        doesn't silently break this link."""
+        match = next((d for d in self.documents if d[2].name == "02_guides.html"), None)
+        if match:
+            _, title, path, is_program = match
+            self._select_document(path, title, is_program)
+        else:
+            self._show_home()
+
     def _open_program(self, path: Path, title: str):
         """Launch an interactive tool in its own pywebview window, spawned
         as a separate process. pywebview needs to run its own event loop
@@ -1920,24 +1932,19 @@ class LauncherApp:
                 justify="left",
             ).pack(anchor="w", pady=(10, 8))
 
-            ctk.CTkLabel(
+            ctk.CTkButton(
                 inner,
-                text="Try asking:",
-                font=F(11, "italic"),
-                text_color=TEXT_MUTED,
-                fg_color=CARD_BG,
+                text="See example prompts in Guides →",
+                font=F(11, "bold"),
+                fg_color="transparent",
+                hover_color=TEXT_DARK,
+                text_color=ACCENT,
+                border_width=0,
+                corner_radius=6,
+                height=22,
+                anchor="w",
+                command=self._open_guides_page,
             ).pack(anchor="w")
-            for prompt in skill["prompts"]:
-                ctk.CTkLabel(
-                    inner,
-                    text=f"• “{prompt}”",
-                    font=F(11),
-                    text_color=TEXT_MUTED,
-                    fg_color=CARD_BG,
-                    wraplength=540,
-                    justify="left",
-                    anchor="w",
-                ).pack(fill="x", padx=(4, 0))
 
     def _show_settings(self):
         """Personal display preferences, saved to settings.json next to
