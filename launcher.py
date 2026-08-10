@@ -617,6 +617,13 @@ DEFAULT_SETTINGS = {
     "sidebar_expanded": True,
     "remember_username": True,  # prefill the last-used login username
     "last_username": "",
+    # Overrides STAFF_PASSWORD once an admin changes it from Settings.
+    # Defaults to the hardcoded constant so a fresh install (with no
+    # settings.json yet) behaves exactly as before. The admin password
+    # itself is intentionally NOT here — it stays fixed in source, since
+    # it's the one credential that shouldn't be changeable from inside
+    # the app itself.
+    "staff_password": STAFF_PASSWORD,
 }
 
 
@@ -1037,7 +1044,7 @@ class LauncherApp:
             password = password_var.get()
             if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
                 role = "admin"
-            elif username == STAFF_USERNAME and password == STAFF_PASSWORD:
+            elif username == STAFF_USERNAME and password == self.settings.get("staff_password", STAFF_PASSWORD):
                 role = "staff"
             else:
                 error_var.set("Incorrect username or password.")
@@ -1861,12 +1868,18 @@ class LauncherApp:
             widget.destroy()
         self._reset_stale_scroll_bindings(rearm_nav=True)
 
-    def _content_header(self, title: str, extra_button=None):
-        """Shared header row (title, optional right-side button) used at
-        the top of every non-welcome content view. Used to also show a
+    def _content_header(self, title: str, extra_button=None, extra_buttons=None):
+        """Shared header row (title, optional right-side button(s)) used
+        at the top of every non-welcome content view. Used to also show a
         colored square with the title's first letter next to the title,
         as a stand-in for a real icon — dropped since it read as a bare
-        "logo" rather than anything meaningful."""
+        "logo" rather than anything meaningful.
+
+        extra_button is a single (text, command) tuple, kept for existing
+        callers; extra_buttons is a list of the same, for when more than
+        one is needed (e.g. "Open in Browser" + an admin-only "Edit This
+        Page"). Buttons are packed right-to-left, so list order reads
+        left-to-right in the header."""
         header = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG)
         header.pack(fill="x", padx=24, pady=(20, 12))
 
@@ -1880,8 +1893,10 @@ class LauncherApp:
             justify="left",
         ).pack(side="left")
 
+        buttons = list(extra_buttons) if extra_buttons else []
         if extra_button is not None:
-            text, command = extra_button
+            buttons.append(extra_button)
+        for text, command in reversed(buttons):
             ctk.CTkButton(
                 header,
                 text=text,
@@ -2311,6 +2326,72 @@ class LauncherApp:
             lambda v: apply_and_rebuild("remember_username", v),
         )
 
+        if self.user_role == "admin":
+            section(
+                "Staff Login Password",
+                "Admin only. Sets the password staff use to sign in — their "
+                "username stays \"staff\". \"Reset to Defaults\" below also "
+                "resets this back to the original password.",
+            )
+
+            staff_pw_new_var = StringVar()
+            staff_pw_confirm_var = StringVar()
+            staff_pw_status_var = StringVar()
+            staff_pw_status_color = {"color": TEXT_MUTED}
+
+            def staff_pw_field(var, placeholder):
+                return ctk.CTkEntry(
+                    scroll,
+                    textvariable=var,
+                    placeholder_text=placeholder,
+                    show="•",
+                    font=F(12),
+                    height=34,
+                    corner_radius=8,
+                    width=260,
+                    fg_color=BODY_BG,
+                    border_color=BORDER,
+                    text_color=TEXT_DARK,
+                )
+
+            staff_pw_field(staff_pw_new_var, "New staff password").pack(anchor="w", pady=(6, 6))
+            staff_pw_field(staff_pw_confirm_var, "Confirm new password").pack(anchor="w")
+
+            staff_pw_status_label = ctk.CTkLabel(
+                scroll, textvariable=staff_pw_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=BODY_BG
+            )
+
+            def update_staff_password():
+                new = staff_pw_new_var.get()
+                confirm = staff_pw_confirm_var.get()
+                if not new:
+                    staff_pw_status_color["color"] = "#c0392b"
+                    staff_pw_status_var.set("Enter a new password.")
+                elif new != confirm:
+                    staff_pw_status_color["color"] = "#c0392b"
+                    staff_pw_status_var.set("New password and confirmation don't match.")
+                else:
+                    self.settings["staff_password"] = new
+                    save_settings(self.settings)
+                    staff_pw_new_var.set("")
+                    staff_pw_confirm_var.set("")
+                    staff_pw_status_color["color"] = "#1f8a4c"
+                    staff_pw_status_var.set("Staff password updated.")
+                staff_pw_status_label.configure(text_color=staff_pw_status_color["color"])
+
+            ctk.CTkButton(
+                scroll,
+                text="Update Staff Password",
+                font=F(12, "bold"),
+                fg_color=ACCENT,
+                hover_color=TEXT_DARK,
+                text_color="white",
+                corner_radius=8,
+                height=34,
+                command=update_staff_password,
+            ).pack(anchor="w", pady=(10, 4))
+            staff_pw_status_label.pack(anchor="w")
+
         reset_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
         reset_row.pack(anchor="w", pady=(30, 0))
         ctk.CTkButton(
@@ -2613,9 +2694,39 @@ class LauncherApp:
                 note_inner.pack(fill="x", padx=14, pady=12)
                 self._build_rich_text(note_inner, block["runs"], base_dir, font_size=11, base_color=TEXT_DARK, bg_color=ACCENT_SOFT)
 
+    def _edit_page_file(self, path: Path):
+        """Admin-only: opens a guide's underlying .html file in a plain
+        text editor, so wording can be tweaked without needing git or
+        Terminal. This deliberately doesn't try to be a rich in-app
+        editor -- it just hands the real file to a real text editor.
+        Guide content is read from disk fresh every time a page opens,
+        so saved changes show up as soon as the page is reopened or
+        Refresh is clicked."""
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", "-a", "TextEdit", str(path)])
+            elif sys.platform.startswith("win"):
+                subprocess.Popen(["notepad.exe", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+            messagebox.showinfo(
+                WINDOW_TITLE,
+                f"Opened {path.name} in a text editor.\n\n"
+                "Save your changes there, then come back and click "
+                "Refresh (bottom of the sidebar) to see them.",
+            )
+        except Exception:
+            messagebox.showerror(
+                WINDOW_TITLE,
+                f"Couldn't open a text editor for this file.\n\nYou can edit it directly at:\n{path}",
+            )
+
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
-        self._content_header(title, extra_button=("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri())))
+        header_buttons = [("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri()))]
+        if self.user_role == "admin":
+            header_buttons.append(("Edit This Page ✎", lambda: self._edit_page_file(path)))
+        self._content_header(title, extra_buttons=header_buttons)
 
         # Guides render natively (same CTk widgets/theme colors as
         # Home/Apps) instead of through tkinterweb, which isn't
