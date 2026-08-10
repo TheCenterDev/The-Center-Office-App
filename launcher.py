@@ -1367,21 +1367,13 @@ class LauncherApp:
         self._reset_stale_scroll_bindings(rearm_nav=True)
 
     def _content_header(self, title: str, extra_button=None):
-        """Shared header row (icon + title, optional right-side button)
-        used at the top of every non-welcome content view."""
+        """Shared header row (title, optional right-side button) used at
+        the top of every non-welcome content view. Used to also show a
+        colored square with the title's first letter next to the title,
+        as a stand-in for a real icon — dropped since it read as a bare
+        "logo" rather than anything meaningful."""
         header = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG)
         header.pack(fill="x", padx=24, pady=(20, 12))
-
-        ctk.CTkLabel(
-            header,
-            text=(title[:1] or "?").upper(),
-            width=34,
-            height=34,
-            corner_radius=10,
-            fg_color=TEXT_DARK,
-            text_color="white",
-            font=F(15, "bold"),
-        ).pack(side="left")
 
         ctk.CTkLabel(
             header,
@@ -1391,7 +1383,7 @@ class LauncherApp:
             fg_color=BODY_BG,
             wraplength=420,
             justify="left",
-        ).pack(side="left", padx=(12, 0))
+        ).pack(side="left")
 
         if extra_button is not None:
             text, command = extra_button
