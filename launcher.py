@@ -371,13 +371,7 @@ SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 SKILLS = [
     {
         "name": "Deposit Reconciliation",
-        "description": (
-            "Ask Claude to reconcile a bank deposit against the donor deposit-detail export, and it "
-            "checks that the two actually match before doing anything else. Once they line up, it builds "
-            "the polished Deposit Detail PDF the board is used to seeing — Checks/Total Deposit, "
-            "Restricted vs. Unrestricted, and Payment Method breakdowns. If something's off, it stops "
-            "and tells you exactly what doesn't match instead of guessing."
-        ),
+        "description": "Checks a deposit against the donor export and builds the Deposit Detail PDF once everything matches.",
         "prompts": [
             "Reconcile this deposit against QuickBooks.",
             "Here's the donor export and the QuickBooks deposit — do they match?",
@@ -387,12 +381,7 @@ SKILLS = [
     },
     {
         "name": "Financial Summary Email",
-        "description": (
-            "Ask Claude to draft the monthly or year-to-date budget-vs-actual financial summary email, "
-            "and it fills in every one of the organization's income and expense categories — never "
-            "skipping one, even if a number is missing for it. It'll check with you for a quick "
-            "explanation on anything newly over budget before finishing the draft."
-        ),
+        "description": "Drafts the monthly budget-vs-actual financial summary email, covering every required category.",
         "prompts": [
             "Draft this month's financials email.",
             "Compile the budget vs actual email with these QuickBooks numbers.",
