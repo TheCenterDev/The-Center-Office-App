@@ -666,16 +666,6 @@ DEFAULT_SETTINGS = {
     "staff_password": STAFF_PASSWORD,
     "admin_password": ADMIN_PASSWORD,
     "director_password": DIRECTOR_PASSWORD,
-    # A folder on this device -- meant to be a shared/synced drive (Google
-    # Drive for Desktop, Dropbox, etc.) mounted the same way on every
-    # computer that should share settings -- where per-person display
-    # preferences also get written, so they follow someone to a different
-    # computer instead of staying stuck on just this one. Empty means
-    # nobody's set this up on this device yet; everything falls back to
-    # today's per-device-only behavior. This is itself a device setting
-    # (each computer's real mount path differs even for the same shared
-    # drive), not a personal one -- see PERSONAL_SETTING_KEYS.
-    "shared_prefs_dir": "",
 }
 
 # Which of the keys above are "my settings" -- tied to the person who's
@@ -765,22 +755,27 @@ def save_users(users: list):
         pass
 
 
-SHARED_PREFS_FILENAME = "office_app_shared_preferences.json"
+# Lives right next to users.json/settings.json -- no separate per-device
+# configuration to set up. If this whole app folder happens to sit inside
+# a shared/synced location (a Google Drive for Desktop folder, a network
+# share, etc.) instead of a plain local one, this file -- and the display
+# preferences in it -- follow along automatically, the same way html/ and
+# assets/ would. If it doesn't, this just behaves like an ordinary local
+# file, same as it does today. Kept as its own small file instead of
+# folded into users.json since it holds no passwords or anything
+# sensitive -- unlike users.json, there's nothing wrong with this one
+# being visible in a shared/synced location.
+SHARED_PREFS_FILE = BASE_DIR / "shared_preferences.json"
 
 
-def load_shared_preferences(shared_dir: str) -> dict:
+def load_shared_preferences() -> dict:
     """Reads {email: {theme, font_scale, default_page, sidebar_expanded}}
-    from SHARED_PREFS_FILENAME inside shared_dir -- one entry per person
-    who's ever changed a setting on any device pointed at this same
-    folder. No passwords or anything else sensitive ever goes in this
-    file, unlike users.json, since it's meant to sit in an ordinary
-    shared/synced drive. Returns {} for an unconfigured, missing,
-    unreadable, or malformed file, so this whole feature is a no-op
-    until someone actually sets shared_prefs_dir (see _show_settings)."""
-    if not shared_dir:
-        return {}
+    from SHARED_PREFS_FILE -- one entry per person who's ever changed a
+    setting on any device that shares this same app folder. Returns {}
+    for a missing, unreadable, or malformed file, so this is a no-op
+    until the file actually exists."""
     try:
-        with open(Path(shared_dir) / SHARED_PREFS_FILENAME, "r", encoding="utf-8") as f:
+        with open(SHARED_PREFS_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, ValueError):
         return {}
@@ -795,24 +790,22 @@ def load_shared_preferences(shared_dir: str) -> dict:
     return result
 
 
-def save_shared_preference(shared_dir: str, email: str, prefs: dict):
+def save_shared_preference(email: str, prefs: dict):
     """Best-effort read-merge-write of just one person's entry into the
     shared file, so two different people saving a preference around the
     same time don't clobber each other's entries. Silently does nothing
-    if shared_dir is unconfigured or the write fails (offline, the drive
-    hasn't finished syncing, no permission, ...) -- a sync hiccup should
-    never block using the app, it just means that save didn't make it to
-    the shared copy this time."""
-    if not shared_dir or not email:
+    if the write fails (folder isn't writable, a sync client has it
+    briefly locked, ...) -- a hiccup here should never block using the
+    app, it just means that save didn't make it to the shared file this
+    time."""
+    if not email:
         return
-    dir_path = Path(shared_dir)
     try:
-        dir_path.mkdir(parents=True, exist_ok=True)
-        all_prefs = load_shared_preferences(shared_dir)
+        all_prefs = load_shared_preferences()
         all_prefs[email.strip().lower()] = {
             k: v for k, v in prefs.items() if k in PERSONAL_SETTING_KEYS
         }
-        with open(dir_path / SHARED_PREFS_FILENAME, "w", encoding="utf-8") as f:
+        with open(SHARED_PREFS_FILE, "w", encoding="utf-8") as f:
             json.dump(all_prefs, f, indent=2)
     except OSError:
         pass
@@ -1330,14 +1323,13 @@ class LauncherApp:
                 # that are about to build reflect their choices instead
                 # of whoever last used this computer.
                 prefs = dict(matched_user.setdefault("preferences", {}))
-                # If this device has a shared/synced folder configured
-                # (see shared_prefs_dir, set up on the Settings page),
-                # the copy saved there wins over this device's own local
-                # cache -- that's the whole point: a choice made on a
-                # different computer should follow the person here, not
-                # get overridden by whatever this computer last cached.
-                shared_dir = self.settings.get("shared_prefs_dir", "")
-                shared_prefs = load_shared_preferences(shared_dir).get(matched_user["email"], {})
+                # shared_preferences.json (see SHARED_PREFS_FILE) wins
+                # over this device's own local cache -- that's the whole
+                # point: a choice made on a different computer that
+                # shares this same app folder should follow the person
+                # here, not get overridden by whatever this computer
+                # last cached.
+                shared_prefs = load_shared_preferences().get(matched_user["email"], {})
                 if shared_prefs:
                     prefs.update(shared_prefs)
                     matched_user["preferences"] = prefs
@@ -1750,18 +1742,14 @@ class LauncherApp:
         self._apply_sidebar_state()
 
     def _sync_shared_preferences(self):
-        """Pushes the signed-in person's current preferences out to the
-        shared/synced folder (see shared_prefs_dir in Settings), if one's
-        configured on this device -- so a change made here shows up the
-        next time they log in on a different computer pointed at the
-        same folder. A no-op for emergency shared logins (no
-        current_user) or when nothing's been configured yet."""
+        """Pushes the signed-in person's current preferences out to
+        shared_preferences.json (see SHARED_PREFS_FILE), so a change
+        made here shows up the next time they log in on a different
+        computer that shares this same app folder. A no-op for
+        emergency shared logins (no current_user)."""
         if self.current_user is None:
             return
-        shared_dir = self.settings.get("shared_prefs_dir", "")
-        if not shared_dir:
-            return
-        save_shared_preference(shared_dir, self.current_user["email"], self.current_user.get("preferences", {}))
+        save_shared_preference(self.current_user["email"], self.current_user.get("preferences", {}))
 
     def _toggle_sidebar(self):
         self._sidebar_expanded = not self._sidebar_expanded
@@ -3113,56 +3101,6 @@ class LauncherApp:
         )
 
         if self.true_role in ("admin", "director"):
-            # Gated on true_role too, for the same reason as View As
-            # below -- this is one-time device setup, not something to
-            # lose access to just because you're previewing a lower role.
-            section(
-                "Shared Settings Folder",
-                "Point this computer at a shared, synced folder (a Google "
-                "Drive for Desktop folder works well) so everyone's theme, "
-                "text size, and startup page follow them to a different "
-                "computer instead of staying stuck on just this one. Set "
-                "this the same way on every computer that should share "
-                "settings -- it's local to this device, not itself synced.",
-            )
-            shared_dir_var = StringVar(value=self.settings.get("shared_prefs_dir", "") or "Not set")
-
-            def choose_shared_dir():
-                chosen = filedialog.askdirectory(title="Choose a shared/synced folder")
-                if not chosen:
-                    return
-                self.settings["shared_prefs_dir"] = chosen
-                save_settings(self.settings)
-                shared_dir_var.set(chosen)
-                # Push whatever's already saved locally out to the newly
-                # chosen folder right away, rather than waiting for the
-                # next preference change to populate it.
-                self._sync_shared_preferences()
-
-            def clear_shared_dir():
-                self.settings["shared_prefs_dir"] = ""
-                save_settings(self.settings)
-                shared_dir_var.set("Not set")
-
-            ctk.CTkLabel(
-                scroll, textvariable=shared_dir_var, font=F(11), text_color=TEXT_MUTED,
-                fg_color=BODY_BG, wraplength=560, justify="left", anchor="w",
-            ).pack(anchor="w", pady=(6, 6))
-            shared_dir_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
-            shared_dir_row.pack(anchor="w")
-            ctk.CTkButton(
-                shared_dir_row, text="Choose Folder…", font=F(12, "bold"), fg_color=ACCENT,
-                hover_color=TEXT_DARK, text_color="white", corner_radius=8, height=32,
-                command=choose_shared_dir,
-            ).pack(side="left")
-            ctk.CTkButton(
-                shared_dir_row, text="Clear", font=F(12, "bold"), fg_color="transparent",
-                hover_color=BORDER, text_color=TEXT_MUTED, border_width=1, border_color=BORDER,
-                corner_radius=8, height=32,
-                command=clear_shared_dir,
-            ).pack(side="left", padx=(8, 0))
-
-        if self.true_role in ("admin", "director"):
             # Gated on true_role, not user_role -- this section has to
             # stay visible even after switching to a lower view, or
             # there'd be no way back to your own role short of signing
@@ -3254,9 +3192,7 @@ class LauncherApp:
         """Restores every display preference to its default — except the
         remembered username, which isn't really a "display" preference
         and shouldn't quietly disappear just because someone reset the
-        theme back to Light, and except shared_prefs_dir, which is this
-        device's own infrastructure setup (where its shared/synced
-        folder lives), not a display preference either.
+        theme back to Light.
 
         Login passwords are handled the same way, but simpler: "Reset to
         Defaults" is for display preferences only and is visible to
@@ -3269,13 +3205,11 @@ class LauncherApp:
         keep_staff_password = self.settings.get("staff_password", STAFF_PASSWORD)
         keep_admin_password = self.settings.get("admin_password", ADMIN_PASSWORD)
         keep_director_password = self.settings.get("director_password", DIRECTOR_PASSWORD)
-        keep_shared_prefs_dir = self.settings.get("shared_prefs_dir", "")
         self.settings = dict(DEFAULT_SETTINGS)
         self.settings["last_username"] = keep_username
         self.settings["staff_password"] = keep_staff_password
         self.settings["admin_password"] = keep_admin_password
         self.settings["director_password"] = keep_director_password
-        self.settings["shared_prefs_dir"] = keep_shared_prefs_dir
         save_settings(self.settings)
         if self.current_user is not None:
             # Same "never touches passwords" rule, applied to this

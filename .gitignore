@@ -22,3 +22,4 @@ __pycache__/
 users.json
 settings.json
 error_log.txt
+shared_preferences.json
