@@ -557,6 +557,14 @@ STAFF_PASSWORD = "Center123"
 ROLES = ("staff", "admin", "director")
 ROLE_LABELS = {"staff": "Staff", "admin": "Admin", "director": "Director"}
 
+# Extra layer of protection on top of users.json itself: even if an
+# email/password pair somehow matched a stored record, or someone tried
+# to log in with an outside address, only this domain is accepted.
+# Checked in both attempt_login (below) and the Team page's Add Person
+# form, so a wrong-domain address is rejected before it's ever compared
+# against a real password, and can't even be added to the roster.
+ALLOWED_EMAIL_DOMAIN = "thecentercc.com"
+
 
 def get_base_dir() -> Path:
     """Folder used to find html/ and assets/ — kept separate from any
@@ -1092,7 +1100,7 @@ class LauncherApp:
         username_entry = ctk.CTkEntry(
             inner,
             textvariable=username_var,
-            placeholder_text="Email",
+            placeholder_text=f"you@{ALLOWED_EMAIL_DOMAIN}",
             font=F(12),
             height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
@@ -1127,6 +1135,16 @@ class LauncherApp:
         def attempt_login(*_event):
             username = username_var.get().strip().lower()
             password = password_var.get()
+            # Extra layer on top of users.json: the emergency shared
+            # logins (director/admin/staff) are plain words, not real
+            # emails, so they're exempt -- but anything else has to end
+            # in @thecentercc.com or it's rejected outright, before it's
+            # ever compared against a stored password.
+            is_legacy_username = username in (DIRECTOR_USERNAME, ADMIN_USERNAME, STAFF_USERNAME)
+            if not is_legacy_username and not username.endswith("@" + ALLOWED_EMAIL_DOMAIN):
+                error_var.set("Incorrect email or password.")
+                password_var.set("")
+                return
             matched_user = next(
                 (u for u in self.users if u["email"] == username and u["password"] == password), None
             )
@@ -2416,7 +2434,7 @@ class LauncherApp:
             )
 
         add_field(add_name_var, "Full name", 160).pack(side="left", padx=(0, 8))
-        add_field(add_email_var, "Email", 190).pack(side="left", padx=(0, 8))
+        add_field(add_email_var, f"name@{ALLOWED_EMAIL_DOMAIN}", 190).pack(side="left", padx=(0, 8))
         add_field(add_password_var, "Password", 130).pack(side="left", padx=(0, 8))
         ctk.CTkOptionMenu(
             add_row,
@@ -2444,8 +2462,8 @@ class LauncherApp:
             if not name or not email or not password:
                 add_status_var.set("Fill in name, email, and password.")
                 add_status_label.configure(text_color="#c0392b")
-            elif "@" not in email:
-                add_status_var.set("Enter a valid email address.")
+            elif not email.endswith("@" + ALLOWED_EMAIL_DOMAIN):
+                add_status_var.set(f"Email must be a @{ALLOWED_EMAIL_DOMAIN} address.")
                 add_status_label.configure(text_color="#c0392b")
             elif any(u["email"] == email for u in self.users):
                 add_status_var.set("Someone with that email is already on the list.")
