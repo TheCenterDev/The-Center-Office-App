@@ -1302,6 +1302,14 @@ class LauncherApp:
         self.search_entry.pack(side="left", fill="both", expand=True, padx=(10, 2), pady=1)
         self.search_entry.bind("<Return>", lambda _e: self._perform_search())
 
+        # Packed once, permanently, so its slot is always reserved --
+        # this button used to be pack()'d in only once there was text
+        # and pack_forget()'d otherwise, which changed box's own required
+        # width each time and squeezed the 🔍 button beside it (even
+        # pushing it out of the sidebar entirely). Now "showing" and
+        # "hiding" the × is just a color change (text/hover color match
+        # the box's own background when hidden, so it's blended away
+        # rather than removed), and the layout never reflows.
         self.search_clear_button = ctk.CTkButton(
             box,
             text="×",
@@ -1309,17 +1317,19 @@ class LauncherApp:
             height=20,
             corner_radius=6,
             fg_color="transparent",
-            hover_color=SIDEBAR_BUTTON_HOVER,
-            text_color=SIDEBAR_TEXT_MUTED,
+            hover_color=SIDEBAR_HOVER,
+            text_color=SIDEBAR_HOVER,
             font=F(13, "bold"),
             command=self._clear_search,
         )
+        self.search_clear_button.pack(side="right", padx=(0, 6))
 
         def _update_search_clear_visibility(*_args):
-            if self.search_var.get():
-                self.search_clear_button.pack(side="right", padx=(0, 6))
-            else:
-                self.search_clear_button.pack_forget()
+            has_text = bool(self.search_var.get())
+            self.search_clear_button.configure(
+                text_color=(SIDEBAR_TEXT_MUTED if has_text else SIDEBAR_HOVER),
+                hover_color=(SIDEBAR_BUTTON_HOVER if has_text else SIDEBAR_HOVER),
+            )
 
         self.search_var.trace_add("write", _update_search_clear_visibility)
         _update_search_clear_visibility()
