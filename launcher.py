@@ -468,6 +468,7 @@ SIDEBAR_WIDTH = 220
 SIDEBAR_COLLAPSED_WIDTH = 40
 
 FONT_FAMILY = "Segoe UI"
+CODE_FONT_FAMILY = "Courier New"  # widely available on both macOS and Windows
 
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 ORDER_PREFIX_RE = re.compile(r"^\d+[\s_.\-]+")
@@ -653,6 +654,15 @@ DEFAULT_SETTINGS = {
     "director_password": DIRECTOR_PASSWORD,
 }
 
+# Which of the keys above are "my settings" -- tied to the person who's
+# logged in (see users.json's "preferences" field) rather than the
+# device. remember_username/last_username and the three emergency
+# shared passwords stay device-level: username-remembering only makes
+# sense before anyone's identity is known yet (it drives what's
+# prefilled on the login screen itself), and the shared passwords are a
+# recovery mechanism, not a display preference.
+PERSONAL_SETTING_KEYS = ("theme", "font_scale", "default_page", "sidebar_expanded")
+
 
 def load_settings() -> dict:
     """Reads settings.json next to html/ and assets/, filling in any
@@ -682,13 +692,17 @@ def save_settings(settings: dict):
 
 def load_users() -> list:
     """Reads users.json next to html/ and assets/ — a list of
-    {"name", "email", "password", "role"} records, one per real person
-    with access to this app. Returns [] if the file is missing, empty,
-    or corrupted (a fresh install, or one where nobody's been added to
-    the Team page yet); the emergency shared admin/staff/director logins
-    (see ADMIN_USERNAME etc.) still work either way. Any record missing
-    a required field or with an unrecognized role is dropped rather than
-    letting one bad entry break the whole list."""
+    {"name", "email", "password", "role", "preferences"} records, one
+    per real person with access to this app. "preferences" holds that
+    person's own Settings choices (see PERSONAL_SETTING_KEYS) so their
+    theme/font size/startup page/sidebar state follow them to whichever
+    login they use, rather than living on the device. Returns [] if the
+    file is missing, empty, or corrupted (a fresh install, or one where
+    nobody's been added to the Team page yet); the emergency shared
+    admin/staff/director logins (see ADMIN_USERNAME etc.) still work
+    either way. Any record missing a required field or with an
+    unrecognized role is dropped rather than letting one bad entry break
+    the whole list."""
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)
@@ -704,8 +718,15 @@ def load_users() -> list:
         email = str(entry.get("email", "")).strip().lower()
         password = entry.get("password", "")
         role = entry.get("role", "")
+        raw_prefs = entry.get("preferences", {})
+        preferences = {
+            k: v for k, v in raw_prefs.items() if k in PERSONAL_SETTING_KEYS
+        } if isinstance(raw_prefs, dict) else {}
         if name and email and isinstance(password, str) and password and role in ROLES:
-            users.append({"name": name, "email": email, "password": password, "role": role})
+            users.append({
+                "name": name, "email": email, "password": password, "role": role,
+                "preferences": preferences,
+            })
     return users
 
 
@@ -1013,6 +1034,34 @@ def build_team_icon(size=16, color="#ffffff"):
     return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
 
 
+def make_text_readonly(widget):
+    """Blocks typing/pasting in a tkinter Text widget while leaving mouse
+    drag-selection and Ctrl/Cmd+C copy fully working.
+
+    The obvious approach, widget.configure(state="disabled"), was what
+    every guide/paragraph/note widget used before -- but a disabled Text
+    widget can't be selected with the mouse at all, which is exactly why
+    none of that content could be copied. This instead renames the
+    widget's own underlying Tcl command and intercepts just the "insert"
+    and "delete" sub-commands (what typing and pasting call); everything
+    else -- "tag", "get", "see", "yview", "compare", etc., which is what
+    mouse selection and the built-in <<Copy>> binding actually use --
+    passes straight through untouched."""
+    original_cmd = widget._w + "_orig"
+    widget.tk.call("rename", widget._w, original_cmd)
+
+    def proxy(command, *args):
+        if command in ("insert", "delete"):
+            return ""
+        try:
+            return widget.tk.call((original_cmd, command) + args)
+        except tk.TclError:
+            return ""
+
+    widget.tk.createcommand(widget._w, proxy)
+    widget.configure(insertwidth=0)  # hide the blinking caret -- still "normal" state underneath
+
+
 class LauncherApp:
     def __init__(self, root: ctk.CTk):
         self.root = root
@@ -1026,7 +1075,13 @@ class LauncherApp:
         self.apps_button = None
         self.skills_button = None
         self.settings_button = None
-        self.user_role = None  # "director", "admin", or "staff" once logged in
+        self.user_role = None  # "director", "admin", or "staff" once logged in --
+                                # this is the *effective* role every permission
+                                # check in the app looks at, and "View As" (see
+                                # _show_settings) is allowed to temporarily lower it
+        self.true_role = None  # the role actually logged in as, set once at login
+                                # and never touched by View As -- used only to
+                                # decide whether the View As control itself shows
         self.current_user = None  # the matched users.json record, or None if
                                    # logged in via one of the emergency shared logins
 
@@ -1161,7 +1216,23 @@ class LauncherApp:
                 password_var.set("")
                 return
             self.user_role = role
+            self.true_role = role
             self.current_user = matched_user
+            if matched_user is not None:
+                # Personal settings (theme, text size, startup page,
+                # sidebar state) travel with the account instead of the
+                # device -- overlay whatever this person has already
+                # chosen on top of the device's own settings.json, then
+                # re-apply right away so the loading screen and layout
+                # that are about to build reflect their choices instead
+                # of whoever last used this computer.
+                prefs = matched_user.setdefault("preferences", {})
+                for key in PERSONAL_SETTING_KEYS:
+                    if key in prefs:
+                        self.settings[key] = prefs[key]
+                apply_theme(self.settings.get("theme", "light"))
+                apply_font_scale(self.settings.get("font_scale", "normal"))
+                self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
             if self.settings.get("remember_username", True):
                 self.settings["last_username"] = username
                 save_settings(self.settings)
@@ -1294,7 +1365,7 @@ class LauncherApp:
         elif selected_path == "settings":
             self._show_settings()
         elif selected_path == "team":
-            if self.user_role == "director":
+            if self.user_role in ("admin", "director"):
                 self._show_team()
             else:
                 self._show_home()
@@ -1522,8 +1593,8 @@ class LauncherApp:
 
         # Team is no longer a pinned sidebar row -- it's reached via a
         # button inside Settings instead (see _show_settings), since it's
-        # a Director-only management page rather than something everyone
-        # navigates to often.
+        # an Admin/Director-only management page rather than something
+        # everyone navigates to often.
 
         self.nav_scroll = ctk.CTkScrollableFrame(
             self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0,
@@ -1564,6 +1635,9 @@ class LauncherApp:
         self._apply_sidebar_state()
         self.settings["sidebar_expanded"] = self._sidebar_expanded
         save_settings(self.settings)
+        if self.current_user is not None:
+            self.current_user.setdefault("preferences", {})["sidebar_expanded"] = self._sidebar_expanded
+            save_users(self.users)
 
     def _apply_sidebar_state(self):
         """Applies self._sidebar_expanded to the already-built sidebar
@@ -2348,14 +2422,14 @@ class LauncherApp:
             ).pack(anchor="w")
 
     def _show_team(self):
-        """Director-only — the pinned sidebar 'Team' entry. A roster of
-        every real person with access: name, email, role, and password
-        (blurred behind a Show/Hide toggle). Director can reveal or
-        change anyone's password, promote a Staff member to Admin or
-        demote an Admin back to Staff, remove a Staff or Admin's access
-        entirely, or add a new person — Director rows themselves aren't
-        deletable/demotable from here, only viewable and password-
-        changeable, since managing peers wasn't asked for.
+        """Admin/Director only — reached from a button in Settings. A
+        roster of every real person with access: name, email, role, and
+        password (blurred behind a Show/Hide toggle). Admin or Director
+        can reveal or change anyone's password, promote a Staff member
+        to Admin or demote an Admin back to Staff, remove a Staff or
+        Admin's access entirely, or add a new person — Director rows
+        themselves aren't deletable/demotable from here, only viewable
+        and password-changeable, since managing peers wasn't asked for.
 
         Reveal and the inline "Change Password" editor are pure local
         widget toggles (pack/pack_forget, label text) with no data
@@ -2400,7 +2474,7 @@ class LauncherApp:
         ).pack(anchor="w")
         ctk.CTkLabel(
             scroll,
-            text="Everyone with access to this app — visible to Director only.",
+            text="Everyone with access to this app — visible to Admin and Director.",
             font=F(12),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
@@ -2454,12 +2528,19 @@ class LauncherApp:
         add_field("Password", add_password_var, "Password", 130, mask=True)
 
         role_group = field_group("Role")
+        # CTkOptionMenu has no border_width/border_color of its own (unlike
+        # CTkEntry), so it's wrapped in a thin bordered frame instead --
+        # otherwise it's the one field in this row without an outline,
+        # which is what looked inconsistent next to the entries beside it.
+        role_wrap = ctk.CTkFrame(role_group, fg_color=BODY_BG, corner_radius=8, border_width=1, border_color=BORDER)
+        role_wrap.pack()
         ctk.CTkOptionMenu(
-            role_group,
+            role_wrap,
             variable=add_role_var,
             values=[ROLE_LABELS[r] for r in ROLES],
-            width=110,
-            height=32,
+            width=108,
+            height=30,
+            corner_radius=6,
             fg_color=BODY_BG,
             button_color=ACCENT,
             button_hover_color=TEXT_DARK,
@@ -2467,7 +2548,7 @@ class LauncherApp:
             dropdown_fg_color=CARD_BG,
             dropdown_text_color=TEXT_DARK,
             dropdown_hover_color=ACCENT_SOFT,
-        ).pack()
+        ).pack(padx=1, pady=1)
 
         add_status_label = ctk.CTkLabel(
             add_inner, textvariable=add_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=CARD_BG
@@ -2488,7 +2569,10 @@ class LauncherApp:
                 add_status_var.set("Someone with that email is already on the list.")
                 add_status_label.configure(text_color="#c0392b")
             else:
-                self.users.append({"name": name, "email": email, "password": password, "role": role})
+                self.users.append({
+                    "name": name, "email": email, "password": password, "role": role,
+                    "preferences": {},
+                })
                 save_users(self.users)
                 self.root.after(1, self._show_team)
 
@@ -2679,11 +2763,16 @@ class LauncherApp:
                 ).pack(anchor="w", pady=(10, 0))
 
     def _show_settings(self):
-        """Personal display preferences, saved to settings.json next to
-        html/ and assets/ so they persist between launches. Every change
-        here applies immediately (no Save button) and triggers a full
-        UI rebuild — see _rebuild_ui — since CustomTkinter widgets don't
-        pick up new colors/fonts on their own once built."""
+        """Personal display preferences. If you're logged in as a real
+        person (not one of the emergency shared logins), these are saved
+        to your own account in users.json, so they follow you to any
+        computer running this app instead of staying behind on this one
+        — see PERSONAL_SETTING_KEYS and attempt_login. Emergency shared
+        logins still fall back to settings.json next to html/ and
+        assets/. Every change here applies immediately (no Save button)
+        and triggers a full UI rebuild — see _rebuild_ui — since
+        CustomTkinter widgets don't pick up new colors/fonts on their
+        own once built."""
         self._selected_path = "settings"
         self._clear_content()
         self._highlight_nav("settings")
@@ -2700,7 +2789,11 @@ class LauncherApp:
         ).pack(anchor="w")
         ctk.CTkLabel(
             scroll,
-            text="Personal display preferences, saved on this computer.",
+            text=(
+                "Saved to your account — follows you wherever you log in."
+                if self.current_user is not None
+                else "Personal display preferences, saved on this computer."
+            ),
             font=F(12),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
@@ -2724,6 +2817,13 @@ class LauncherApp:
         def apply_and_rebuild(key, value):
             self.settings[key] = value
             save_settings(self.settings)
+            if self.current_user is not None and key in PERSONAL_SETTING_KEYS:
+                # Signed in as a real person -- this choice is theirs,
+                # not just this device's, so it's saved to their own
+                # record too. It'll win over whatever's in settings.json
+                # the next time they (or anyone else) logs in.
+                self.current_user.setdefault("preferences", {})[key] = value
+                save_users(self.users)
             if key == "theme":
                 apply_theme(value)
             elif key == "font_scale":
@@ -2778,7 +2878,31 @@ class LauncherApp:
             lambda v: apply_and_rebuild("remember_username", v),
         )
 
-        if self.user_role == "director":
+        if self.true_role in ("admin", "director"):
+            # Gated on true_role, not user_role -- this section has to
+            # stay visible even after switching to a lower view, or
+            # there'd be no way back to your own role short of signing
+            # out and back in.
+            section(
+                "View As",
+                "Preview the app the way a lower-access role sees it — "
+                "nothing about your own access changes, and this resets "
+                "automatically when you sign out.",
+            )
+            view_as_options = [(self.true_role, f"{ROLE_LABELS[self.true_role]} (Me)")]
+            if self.true_role == "director":
+                view_as_options.append(("admin", "Admin"))
+            view_as_options.append(("staff", "Staff"))
+
+            def set_view_as(role):
+                self.user_role = role
+                # Same deferral as apply_and_rebuild above -- _rebuild_ui
+                # tears down this very button's ancestors.
+                self.root.after(1, self._rebuild_ui)
+
+            self._settings_choice_row(scroll, view_as_options, self.user_role, set_view_as)
+
+        if self.user_role in ("admin", "director"):
             section(
                 "Team",
                 "See everyone with access, reveal or change anyone's "
@@ -2865,6 +2989,14 @@ class LauncherApp:
         self.settings["admin_password"] = keep_admin_password
         self.settings["director_password"] = keep_director_password
         save_settings(self.settings)
+        if self.current_user is not None:
+            # Same "never touches passwords" rule, applied to this
+            # person's own record instead of settings.json: clear their
+            # saved display preferences so they go back to the defaults
+            # above too, rather than reset appearing to work here and
+            # then silently reverting the next time they log back in.
+            self.current_user["preferences"] = {}
+            save_users(self.users)
         apply_theme(self.settings["theme"])
         apply_font_scale(self.settings["font_scale"])
         self._sidebar_expanded = self.settings["sidebar_expanded"]
@@ -2993,12 +3125,17 @@ class LauncherApp:
             cursor="arrow", takefocus=0, height=1,
         )
         widget.tag_configure("bold", font=F(font_size, "bold"), foreground=TEXT_DARK)
+        widget.tag_configure("italic", font=(FONT_FAMILY, F(font_size)[1], "italic"))
+        widget.tag_configure(
+            "code", font=(CODE_FONT_FAMILY, F(font_size)[1]), foreground=TEXT_DARK,
+            background=BORDER,
+        )
         widget.tag_configure("fill", foreground="#b45309")
         widget.tag_configure("link", foreground=ACCENT, underline=True)
 
         has_link = False
         for text, styleset, href in runs:
-            tags = [s for s in ("bold", "fill") if s in styleset]
+            tags = [s for s in ("bold", "italic", "code", "fill") if s in styleset]
             if href:
                 tags.append("link")
                 tags.append(f"href::{href}")
@@ -3018,7 +3155,7 @@ class LauncherApp:
             widget.tag_bind("link", "<Enter>", lambda e: widget.configure(cursor=hand_cursor))
             widget.tag_bind("link", "<Leave>", lambda e: widget.configure(cursor="arrow"))
 
-        widget.configure(state="disabled")
+        make_text_readonly(widget)
         widget.pack(fill="x", anchor="w")
 
         def resize(event=None):
@@ -3127,6 +3264,14 @@ class LauncherApp:
         Guide content is read from disk fresh every time a page opens,
         so saved changes show up as soon as the page is reopened or
         Refresh is clicked."""
+        if not path.exists():
+            messagebox.showerror(
+                WINDOW_TITLE,
+                f"Couldn't find this page's file on disk:\n{path}\n\n"
+                "It may have been moved or renamed. Click Refresh (bottom "
+                "of the sidebar) and try again.",
+            )
+            return
         try:
             if sys.platform == "darwin":
                 subprocess.Popen(["open", "-a", "TextEdit", str(path)])
@@ -3280,6 +3425,7 @@ class LauncherApp:
         Replaces the old 'How to Use This Launcher' button, which just
         popped up a plain text messagebox of navigation tips."""
         self.user_role = None
+        self.true_role = None
         self.current_user = None
         self._selected_path = None
         self._last_search_query = ""
