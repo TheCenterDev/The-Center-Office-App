@@ -1850,9 +1850,12 @@ class LauncherApp:
         self._clear_content()
         self._content_header(title, extra_button=("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri())))
 
-        viewer_card = ctk.CTkFrame(
-            self.content_frame, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER
-        )
+        # No border here (unlike some other cards) so guide pages match the
+        # borderless look of Home/Apps -- this used to have
+        # border_width=1, border_color=BORDER, which is the outline that
+        # only ever showed up on guide pages (FAQ, Guides, Contacts),
+        # never Home/Apps, since those don't use this card at all.
+        viewer_card = ctk.CTkFrame(self.content_frame, fg_color=CARD_BG, corner_radius=14)
         viewer_card.pack(fill="both", expand=True, padx=24, pady=(0, 20))
 
         try:
