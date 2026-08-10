@@ -13,3 +13,12 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Runtime data generated next to the app on each machine — real names,
+# emails, and passwords, plus personal display settings and crash logs.
+# Never meant to be committed, same reasoning as settings.json and
+# error_log.txt (which simply never get created inside this folder to
+# begin with, since the packaged app keeps its copies in /Applications).
+users.json
+settings.json
+error_log.txt

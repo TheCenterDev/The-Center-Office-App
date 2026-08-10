@@ -537,19 +537,25 @@ LOGIN_TEXT = "#1D2071"
 LOGIN_BORDER = "#dde1ee"
 LOGIN_ACCENT_SOFT = "#e3f8ff"
 
-# No real email/accounts system yet — these three hardcoded logins are
-# a placeholder gate until The Center wants real per-person accounts.
-# Owner outranks Admin: everything Admin can do, plus changing the
-# Admin password and their own Owner password (see _show_settings).
-# Only the Admin and Staff passwords are meant to ever be changed from
-# inside the app (see DEFAULT_SETTINGS/"staff_password" etc. below) —
-# these constants are just the hardcoded fallback for a fresh install.
-OWNER_USERNAME = "owner"
-OWNER_PASSWORD = "Th3CeNt3r2005!"
+# Real per-person accounts now live in users.json (name/email/password/
+# role — see USERS_FILE/load_users()/save_users() below), managed from
+# the Director-only Team page. These three shared logins are kept only
+# as an emergency fallback — if users.json is ever missing, empty, or
+# corrupted, these still get in the door. Director outranks Admin:
+# everything Admin can do, plus managing the whole team (see
+# _show_team) and changing anyone's password, including another
+# Director's.
+DIRECTOR_USERNAME = "director"
+DIRECTOR_PASSWORD = "Th3CeNt3r2005!"
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "TH3Center1"
 STAFF_USERNAME = "staff"
 STAFF_PASSWORD = "Center123"
+
+# Valid roles, lowest to highest. Used to build the role-choice
+# dropdown on the Team page and to validate users.json entries.
+ROLES = ("staff", "admin", "director")
+ROLE_LABELS = {"staff": "Staff", "admin": "Admin", "director": "Director"}
 
 
 def get_base_dir() -> Path:
@@ -583,6 +589,11 @@ HTML_DIR = BASE_DIR / "html"
 ASSETS_DIR = BASE_DIR / "assets"
 SETTINGS_FILE = BASE_DIR / "settings.json"
 ERROR_LOG_FILE = BASE_DIR / "error_log.txt"
+# Real people, with real emails and passwords — deliberately kept out
+# of git (see .gitignore) the same way settings.json and error_log.txt
+# already are, just next to the app on this machine instead of baked
+# into the source code that gets pushed to GitHub.
+USERS_FILE = BASE_DIR / "users.json"
 
 
 def write_error_log(details: str):
@@ -624,15 +635,14 @@ DEFAULT_SETTINGS = {
     "sidebar_expanded": True,
     "remember_username": True,  # prefill the last-used login username
     "last_username": "",
-    # Overrides for STAFF_PASSWORD/ADMIN_PASSWORD/OWNER_PASSWORD once
-    # someone changes them from Settings. Each defaults to its hardcoded
-    # constant so a fresh install (with no settings.json yet) behaves
-    # exactly as before. Staff's password can be changed by Admin or
-    # Owner; Admin's and Owner's own passwords can only be changed by
-    # Owner (see the role checks in _show_settings).
+    # Fallback values for the emergency shared admin/staff/director
+    # logins (see ADMIN_USERNAME etc. above) — not exposed anywhere in
+    # the UI anymore now that real people are managed on the Team page,
+    # but kept here (and preserved by "Reset to Defaults") as a way back
+    # in if users.json is ever lost.
     "staff_password": STAFF_PASSWORD,
     "admin_password": ADMIN_PASSWORD,
-    "owner_password": OWNER_PASSWORD,
+    "director_password": DIRECTOR_PASSWORD,
 }
 
 
@@ -658,6 +668,46 @@ def save_settings(settings: dict):
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2)
+    except OSError:
+        pass
+
+
+def load_users() -> list:
+    """Reads users.json next to html/ and assets/ — a list of
+    {"name", "email", "password", "role"} records, one per real person
+    with access to this app. Returns [] if the file is missing, empty,
+    or corrupted (a fresh install, or one where nobody's been added to
+    the Team page yet); the emergency shared admin/staff/director logins
+    (see ADMIN_USERNAME etc.) still work either way. Any record missing
+    a required field or with an unrecognized role is dropped rather than
+    letting one bad entry break the whole list."""
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    users = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        email = str(entry.get("email", "")).strip().lower()
+        password = entry.get("password", "")
+        role = entry.get("role", "")
+        if name and email and isinstance(password, str) and password and role in ROLES:
+            users.append({"name": name, "email": email, "password": password, "role": role})
+    return users
+
+
+def save_users(users: list):
+    """Best-effort write, same as save_settings — if it fails, the in-
+    memory list is still correct for the rest of this session, it just
+    won't have persisted for next launch."""
+    try:
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(users, f, indent=2)
     except OSError:
         pass
 
@@ -946,9 +996,13 @@ class LauncherApp:
         self.apps_button = None
         self.skills_button = None
         self.settings_button = None
-        self.user_role = None  # "owner", "admin", or "staff" once logged in
+        self.team_button = None
+        self.user_role = None  # "director", "admin", or "staff" once logged in
+        self.current_user = None  # the matched users.json record, or None if
+                                   # logged in via one of the emergency shared logins
 
         self.settings = load_settings()
+        self.users = load_users()
         self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
         apply_theme(self.settings.get("theme", "light"))
         apply_font_scale(self.settings.get("font_scale", "normal"))
@@ -1016,7 +1070,7 @@ class LauncherApp:
         username_entry = ctk.CTkEntry(
             inner,
             textvariable=username_var,
-            placeholder_text="Username",
+            placeholder_text="Email",
             font=F(12),
             height=LOGIN_FIELD_HEIGHT,
             corner_radius=8,
@@ -1051,17 +1105,23 @@ class LauncherApp:
         def attempt_login(*_event):
             username = username_var.get().strip().lower()
             password = password_var.get()
-            if username == OWNER_USERNAME and password == self.settings.get("owner_password", OWNER_PASSWORD):
-                role = "owner"
+            matched_user = next(
+                (u for u in self.users if u["email"] == username and u["password"] == password), None
+            )
+            if matched_user is not None:
+                role = matched_user["role"]
+            elif username == DIRECTOR_USERNAME and password == self.settings.get("director_password", DIRECTOR_PASSWORD):
+                role = "director"
             elif username == ADMIN_USERNAME and password == self.settings.get("admin_password", ADMIN_PASSWORD):
                 role = "admin"
             elif username == STAFF_USERNAME and password == self.settings.get("staff_password", STAFF_PASSWORD):
                 role = "staff"
             else:
-                error_var.set("Incorrect username or password.")
+                error_var.set("Incorrect email or password.")
                 password_var.set("")
                 return
             self.user_role = role
+            self.current_user = matched_user
             if self.settings.get("remember_username", True):
                 self.settings["last_username"] = username
                 save_settings(self.settings)
@@ -1193,6 +1253,11 @@ class LauncherApp:
             self._show_skills()
         elif selected_path == "settings":
             self._show_settings()
+        elif selected_path == "team":
+            if self.user_role == "director":
+                self._show_team()
+            else:
+                self._show_home()
         elif selected_path == "search":
             if last_search_query:
                 self._show_search_results(last_search_query)
@@ -1414,6 +1479,25 @@ class LauncherApp:
             command=self._show_skills,
         )
         self.skills_button.pack(fill="x")
+
+        # Director-only — everyone else never sees this row at all,
+        # rather than seeing it disabled/greyed out.
+        if self.user_role == "director":
+            team_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
+            team_row.pack(fill="x", padx=6, pady=(0, 4))
+            self.team_button = ctk.CTkButton(
+                team_row,
+                text="Team",
+                anchor="w",
+                font=F(12, "bold"),
+                fg_color=SIDEBAR_BG,
+                hover_color=SIDEBAR_BUTTON_HOVER,
+                text_color=SIDEBAR_TEXT,
+                corner_radius=8,
+                height=36,
+                command=self._show_team,
+            )
+            self.team_button.pack(fill="x")
 
         self.nav_scroll = ctk.CTkScrollableFrame(
             self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0,
@@ -1774,6 +1858,11 @@ class LauncherApp:
             fg_color=(SIDEBAR_ACTIVE if active_path == "settings" else "transparent"),
             text_color=(ACCENT if active_path == "settings" else SIDEBAR_TEXT_MUTED),
         )
+        safe_configure(
+            self.team_button,
+            fg_color=(SIDEBAR_ACTIVE if active_path == "team" else SIDEBAR_BG),
+            text_color=(ACCENT if active_path == "team" else SIDEBAR_TEXT),
+        )
         for path, btn in list(self._nav_buttons.items()):
             safe_configure(
                 btn,
@@ -1953,7 +2042,7 @@ class LauncherApp:
         self._render_logo(logo_inner, self._welcome_logo, 64)
 
         home_page_path = HTML_DIR / "01_welcome.html"
-        if self.user_role in ("admin", "owner"):
+        if self.user_role in ("admin", "director"):
             edit_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
             edit_row.pack(fill="x", pady=(0, 4))
             ctk.CTkButton(
@@ -2237,6 +2326,300 @@ class LauncherApp:
                 command=self._open_guides_page,
             ).pack(anchor="w")
 
+    def _show_team(self):
+        """Director-only — the pinned sidebar 'Team' entry. A roster of
+        every real person with access: name, email, role, and password
+        (blurred behind a Show/Hide toggle). Director can reveal or
+        change anyone's password, promote a Staff member to Admin or
+        demote an Admin back to Staff, remove a Staff or Admin's access
+        entirely, or add a new person — Director rows themselves aren't
+        deletable/demotable from here, only viewable and password-
+        changeable, since managing peers wasn't asked for.
+
+        Reveal and the inline "Change Password" editor are pure local
+        widget toggles (pack/pack_forget, label text) with no data
+        change, so they don't redraw anything. Anything that actually
+        edits self.users (add, save password, promote/demote, remove)
+        saves to users.json and then redraws via
+        self.root.after(1, self._show_team) — deferred for the same
+        reason documented on _sign_out/apply_and_rebuild: these buttons
+        sit on cards a redraw would otherwise destroy synchronously out
+        from under their own click handler."""
+        self._selected_path = "team"
+        self._clear_content()
+        self._highlight_nav("team")
+
+        scroll = ctk.CTkScrollableFrame(
+            self.content_frame, fg_color=BODY_BG, corner_radius=0,
+            scrollbar_fg_color=BODY_BG, scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=TEXT_MUTED,
+        )
+        scroll.pack(fill="both", expand=True, padx=32, pady=28)
+
+        ctk.CTkLabel(
+            scroll, text="Team", font=F(19, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            scroll,
+            text="Everyone with access to this app — visible to Director only.",
+            font=F(12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+        ).pack(anchor="w", pady=(2, 18))
+
+        # -------------------------------------------------- add person --
+        add_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
+        add_card.pack(fill="x", pady=(0, 16))
+        add_inner = ctk.CTkFrame(add_card, fg_color=CARD_BG)
+        add_inner.pack(fill="x", padx=18, pady=16)
+
+        ctk.CTkLabel(
+            add_inner, text="Add Person", font=F(13, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
+        ).pack(anchor="w", pady=(0, 10))
+
+        add_row = ctk.CTkFrame(add_inner, fg_color=CARD_BG)
+        add_row.pack(fill="x")
+
+        add_name_var = StringVar()
+        add_email_var = StringVar()
+        add_password_var = StringVar()
+        role_by_label = {v: k for k, v in ROLE_LABELS.items()}
+        add_role_var = StringVar(value=ROLE_LABELS["staff"])
+        add_status_var = StringVar()
+
+        def add_field(var, placeholder, width):
+            return ctk.CTkEntry(
+                add_row, textvariable=var, placeholder_text=placeholder, font=F(12),
+                height=32, corner_radius=8, width=width, fg_color=BODY_BG,
+                border_color=BORDER, text_color=TEXT_DARK,
+            )
+
+        add_field(add_name_var, "Full name", 160).pack(side="left", padx=(0, 8))
+        add_field(add_email_var, "Email", 190).pack(side="left", padx=(0, 8))
+        add_field(add_password_var, "Password", 130).pack(side="left", padx=(0, 8))
+        ctk.CTkOptionMenu(
+            add_row,
+            variable=add_role_var,
+            values=[ROLE_LABELS[r] for r in ROLES],
+            width=100,
+            height=32,
+            fg_color=BODY_BG,
+            button_color=BORDER,
+            button_hover_color=TEXT_MUTED,
+            text_color=TEXT_DARK,
+            dropdown_fg_color=CARD_BG,
+            dropdown_text_color=TEXT_DARK,
+        ).pack(side="left")
+
+        add_status_label = ctk.CTkLabel(
+            add_inner, textvariable=add_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=CARD_BG
+        )
+
+        def add_person():
+            name = add_name_var.get().strip()
+            email = add_email_var.get().strip().lower()
+            password = add_password_var.get()
+            role = role_by_label.get(add_role_var.get(), "staff")
+            if not name or not email or not password:
+                add_status_var.set("Fill in name, email, and password.")
+                add_status_label.configure(text_color="#c0392b")
+            elif "@" not in email:
+                add_status_var.set("Enter a valid email address.")
+                add_status_label.configure(text_color="#c0392b")
+            elif any(u["email"] == email for u in self.users):
+                add_status_var.set("Someone with that email is already on the list.")
+                add_status_label.configure(text_color="#c0392b")
+            else:
+                self.users.append({"name": name, "email": email, "password": password, "role": role})
+                save_users(self.users)
+                self.root.after(1, self._show_team)
+
+        ctk.CTkButton(
+            add_inner,
+            text="Add Person",
+            font=F(12, "bold"),
+            fg_color=ACCENT,
+            hover_color=TEXT_DARK,
+            text_color="white",
+            corner_radius=8,
+            height=32,
+            command=add_person,
+        ).pack(anchor="w", pady=(10, 4))
+        add_status_label.pack(anchor="w")
+
+        # ------------------------------------------------------ roster --
+        if not self.users:
+            ctk.CTkLabel(
+                scroll,
+                text="Nobody's been added yet — use Add Person above.",
+                font=F(12),
+                text_color=TEXT_MUTED,
+                fg_color=BODY_BG,
+            ).pack(anchor="w")
+            return
+
+        for user in sorted(self.users, key=lambda u: u["name"].lower()):
+            # A fresh dict per person, referenced by every closure below
+            # via a default arg (state=row_state) -- this is what keeps
+            # each row's buttons wired to *that row's* widgets instead of
+            # all silently ending up bound to the last row built, which
+            # is the classic Python closure-in-a-loop trap.
+            row_state = {"pw_shown": False, "editor_open": False}
+
+            card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
+            card.pack(fill="x", pady=8)
+            inner = ctk.CTkFrame(card, fg_color=CARD_BG)
+            inner.pack(fill="x", padx=18, pady=16)
+
+            top_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
+            top_row.pack(fill="x")
+            ctk.CTkLabel(
+                top_row, text=user["name"], font=F(14, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG, anchor="w"
+            ).pack(side="left")
+            badge = ctk.CTkFrame(top_row, fg_color=ACCENT_SOFT, corner_radius=6)
+            badge.pack(side="left", padx=(10, 0))
+            ctk.CTkLabel(
+                badge, text=ROLE_LABELS[user["role"]], font=F(10, "bold"), text_color=ACCENT, fg_color=ACCENT_SOFT
+            ).pack(padx=8, pady=2)
+
+            if user["role"] != "director":
+                def remove_person(email=user["email"], name=user["name"]):
+                    if messagebox.askyesno(
+                        WINDOW_TITLE, f"Remove {name}'s access? They won't be able to sign in anymore."
+                    ):
+                        self.users = [u for u in self.users if u["email"] != email]
+                        save_users(self.users)
+                        self.root.after(1, self._show_team)
+
+                ctk.CTkButton(
+                    top_row,
+                    text="Remove Access",
+                    font=F(11),
+                    fg_color="transparent",
+                    hover_color=BORDER,
+                    text_color="#c0392b",
+                    border_width=1,
+                    border_color=BORDER,
+                    corner_radius=8,
+                    height=26,
+                    command=remove_person,
+                ).pack(side="right")
+
+            ctk.CTkLabel(
+                inner, text=user["email"], font=F(12), text_color=TEXT_MUTED, fg_color=CARD_BG
+            ).pack(anchor="w", pady=(4, 10))
+
+            # ---- password: hidden by default, revealed via Show/Hide --
+            pw_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
+            pw_row.pack(fill="x")
+            pw_display_var = StringVar(value="•" * max(8, len(user["password"])))
+            ctk.CTkLabel(
+                pw_row, textvariable=pw_display_var, font=F(12, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
+            ).pack(side="left")
+
+            def toggle_password(pw=user["password"], display_var=pw_display_var, state=row_state):
+                state["pw_shown"] = not state["pw_shown"]
+                display_var.set(pw if state["pw_shown"] else "•" * max(8, len(pw)))
+                state["reveal_btn"].configure(text=("Hide" if state["pw_shown"] else "Show"))
+
+            reveal_btn = ctk.CTkButton(
+                pw_row, text="Show", font=F(11), fg_color="transparent", hover_color=BORDER,
+                text_color=ACCENT, border_width=0, corner_radius=6, height=24, width=50,
+                command=toggle_password,
+            )
+            row_state["reveal_btn"] = reveal_btn
+            reveal_btn.pack(side="left", padx=(10, 0))
+
+            # ---- change password: collapsed inline editor --
+            def toggle_editor(state=row_state):
+                state["editor_open"] = not state["editor_open"]
+                if state["editor_open"]:
+                    state["editor_frame"].pack(fill="x", pady=(10, 0))
+                else:
+                    state["editor_frame"].pack_forget()
+                state["change_pw_btn"].configure(text=("Cancel" if state["editor_open"] else "Change Password"))
+
+            change_pw_btn = ctk.CTkButton(
+                pw_row, text="Change Password", font=F(11), fg_color="transparent", hover_color=BORDER,
+                text_color=TEXT_MUTED, border_width=1, border_color=BORDER, corner_radius=6, height=24,
+                command=toggle_editor,
+            )
+            row_state["change_pw_btn"] = change_pw_btn
+            change_pw_btn.pack(side="right")
+
+            editor_frame = ctk.CTkFrame(inner, fg_color=CARD_BG)
+            row_state["editor_frame"] = editor_frame
+            # Not packed yet — toggle_editor packs it on demand.
+
+            new_pw_var = StringVar()
+            confirm_pw_var = StringVar()
+            editor_status_var = StringVar()
+
+            def editor_field(var, placeholder):
+                return ctk.CTkEntry(
+                    editor_frame, textvariable=var, placeholder_text=placeholder, show="•", font=F(12),
+                    height=32, corner_radius=8, width=180, fg_color=BODY_BG, border_color=BORDER,
+                    text_color=TEXT_DARK,
+                )
+
+            editor_row = ctk.CTkFrame(editor_frame, fg_color=CARD_BG)
+            editor_row.pack(fill="x")
+            editor_field(new_pw_var, "New password").pack(side="left", padx=(0, 8))
+            editor_field(confirm_pw_var, "Confirm new password").pack(side="left", padx=(0, 8))
+
+            editor_status_label = ctk.CTkLabel(
+                editor_frame, textvariable=editor_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=CARD_BG
+            )
+
+            def save_password(email=user["email"], new_var=new_pw_var, confirm_var=confirm_pw_var,
+                               status_var=editor_status_var, status_label=editor_status_label):
+                new = new_var.get()
+                confirm = confirm_var.get()
+                if not new:
+                    status_var.set("Enter a new password.")
+                    status_label.configure(text_color="#c0392b")
+                elif new != confirm:
+                    status_var.set("New password and confirmation don't match.")
+                    status_label.configure(text_color="#c0392b")
+                else:
+                    for u in self.users:
+                        if u["email"] == email:
+                            u["password"] = new
+                            break
+                    save_users(self.users)
+                    self.root.after(1, self._show_team)
+
+            ctk.CTkButton(
+                editor_row, text="Save", font=F(11, "bold"), fg_color=ACCENT, hover_color=TEXT_DARK,
+                text_color="white", corner_radius=8, height=32, width=70, command=save_password,
+            ).pack(side="left")
+            editor_status_label.pack(anchor="w", pady=(6, 0))
+
+            # ---- promote / demote (staff <-> admin only) --
+            if user["role"] in ("staff", "admin"):
+                def toggle_role(email=user["email"], current_role=user["role"]):
+                    new_role = "admin" if current_role == "staff" else "staff"
+                    for u in self.users:
+                        if u["email"] == email:
+                            u["role"] = new_role
+                            break
+                    save_users(self.users)
+                    self.root.after(1, self._show_team)
+
+                ctk.CTkButton(
+                    inner,
+                    text=("Promote to Admin" if user["role"] == "staff" else "Demote to Staff"),
+                    font=F(11, "bold"),
+                    fg_color="transparent",
+                    hover_color=TEXT_DARK,
+                    text_color=ACCENT,
+                    border_width=0,
+                    corner_radius=6,
+                    height=24,
+                    anchor="w",
+                    command=toggle_role,
+                ).pack(anchor="w", pady=(10, 0))
+
     def _show_settings(self):
         """Personal display preferences, saved to settings.json next to
         html/ and assets/ so they persist between launches. Every change
@@ -2337,97 +2720,13 @@ class LauncherApp:
             lambda v: apply_and_rebuild("remember_username", v),
         )
 
-        def password_change_section(heading, subtext, settings_key, placeholder_label, button_text):
-            """One reusable 'change a login password' block: new + confirm
-            fields, a save button, and an inline status message. Used for
-            Staff (admin/owner), Admin (owner only), and Owner's own
-            password (owner only) below — same shape each time, just a
-            different settings.json key and who's allowed to see it."""
-            section(heading, subtext)
-
-            new_var = StringVar()
-            confirm_var = StringVar()
-            status_var = StringVar()
-            status_color = {"color": TEXT_MUTED}
-
-            def field(var, placeholder):
-                return ctk.CTkEntry(
-                    scroll,
-                    textvariable=var,
-                    placeholder_text=placeholder,
-                    show="•",
-                    font=F(12),
-                    height=34,
-                    corner_radius=8,
-                    width=260,
-                    fg_color=BODY_BG,
-                    border_color=BORDER,
-                    text_color=TEXT_DARK,
-                )
-
-            field(new_var, f"New {placeholder_label}").pack(anchor="w", pady=(6, 6))
-            field(confirm_var, "Confirm new password").pack(anchor="w")
-
-            status_label = ctk.CTkLabel(
-                scroll, textvariable=status_var, font=F(11), text_color=TEXT_MUTED, fg_color=BODY_BG
-            )
-
-            def update_password():
-                new = new_var.get()
-                confirm = confirm_var.get()
-                if not new:
-                    status_color["color"] = "#c0392b"
-                    status_var.set("Enter a new password.")
-                elif new != confirm:
-                    status_color["color"] = "#c0392b"
-                    status_var.set("New password and confirmation don't match.")
-                else:
-                    self.settings[settings_key] = new
-                    save_settings(self.settings)
-                    new_var.set("")
-                    confirm_var.set("")
-                    status_color["color"] = "#1f8a4c"
-                    status_var.set("Password updated.")
-                status_label.configure(text_color=status_color["color"])
-
-            ctk.CTkButton(
-                scroll,
-                text=button_text,
-                font=F(12, "bold"),
-                fg_color=ACCENT,
-                hover_color=TEXT_DARK,
-                text_color="white",
-                corner_radius=8,
-                height=34,
-                command=update_password,
-            ).pack(anchor="w", pady=(10, 4))
-            status_label.pack(anchor="w")
-
-        if self.user_role in ("admin", "owner"):
-            password_change_section(
-                "Staff Login Password",
-                "Admin/Owner only. Sets the password staff use to sign in — "
-                "their username stays \"staff\".",
-                "staff_password",
-                "staff password",
-                "Update Staff Password",
-            )
-
-        if self.user_role == "owner":
-            password_change_section(
-                "Admin Login Password",
-                "Owner only. Sets the password admin uses to sign in — "
-                "their username stays \"admin\".",
-                "admin_password",
-                "admin password",
-                "Update Admin Password",
-            )
-            password_change_section(
-                "Owner Login Password",
-                "Your own password.",
-                "owner_password",
-                "owner password",
-                "Update Owner Password",
+        if self.user_role == "director":
+            section(
+                "Team Passwords",
+                "Every person's password is now managed from the Team page "
+                "(pinned near the top of the sidebar) instead of here — "
+                "open it to see the full roster, reveal or change anyone's "
+                "password, promote/demote, or remove access.",
             )
 
         reset_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
@@ -2477,19 +2776,20 @@ class LauncherApp:
 
         Login passwords are handled the same way, but simpler: "Reset to
         Defaults" is for display preferences only and is visible to
-        everyone (including Staff), so it never touches any of the three
-        login passwords, no matter who clicks it or what role they are.
-        Changing a password is only ever done deliberately, through its
-        own dedicated field above."""
+        everyone (including Staff), so it never touches the emergency
+        shared admin/staff/director passwords, no matter who clicks it.
+        Real people's individual passwords live in users.json, which
+        this doesn't touch at all — that's managed entirely from the
+        Team page."""
         keep_username = self.settings.get("last_username", "")
         keep_staff_password = self.settings.get("staff_password", STAFF_PASSWORD)
         keep_admin_password = self.settings.get("admin_password", ADMIN_PASSWORD)
-        keep_owner_password = self.settings.get("owner_password", OWNER_PASSWORD)
+        keep_director_password = self.settings.get("director_password", DIRECTOR_PASSWORD)
         self.settings = dict(DEFAULT_SETTINGS)
         self.settings["last_username"] = keep_username
         self.settings["staff_password"] = keep_staff_password
         self.settings["admin_password"] = keep_admin_password
-        self.settings["owner_password"] = keep_owner_password
+        self.settings["director_password"] = keep_director_password
         save_settings(self.settings)
         apply_theme(self.settings["theme"])
         apply_font_scale(self.settings["font_scale"])
@@ -2775,7 +3075,7 @@ class LauncherApp:
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
         header_buttons = [("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri()))]
-        if self.user_role in ("admin", "owner"):
+        if self.user_role in ("admin", "director"):
             header_buttons.append(("Edit This Page ✎", lambda: self._edit_page_file(path)))
         self._content_header(title, extra_buttons=header_buttons)
 
@@ -2906,6 +3206,7 @@ class LauncherApp:
         Replaces the old 'How to Use This Launcher' button, which just
         popped up a plain text messagebox of navigation tips."""
         self.user_role = None
+        self.current_user = None
         self._selected_path = None
         self._last_search_query = ""
         # These are all long-lived references to this session's sidebar
@@ -2923,6 +3224,7 @@ class LauncherApp:
         self.apps_button = None
         self.skills_button = None
         self.settings_button = None
+        self.team_button = None
         self._nav_buttons = {}
         for widget in self.root.winfo_children():
             widget.destroy()
