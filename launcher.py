@@ -1474,7 +1474,7 @@ class LauncherApp:
         footer_button("Refresh", self.refresh_documents).pack(fill="x", pady=1)
         self.settings_button = footer_button("Settings", self._show_settings)
         self.settings_button.pack(fill="x", pady=1)
-        footer_button("How to Use This Launcher", self.show_help).pack(fill="x", pady=1)
+        footer_button("Sign Out", self._sign_out).pack(fill="x", pady=1)
         footer_button("Quit", self.root.destroy).pack(fill="x", pady=1)
 
     def _render_logo(self, parent, logo_image, placeholder_size, anchor="w"):
@@ -2704,28 +2704,22 @@ class LauncherApp:
             command=lambda: self._open_program(path, title),
         ).pack()
 
-    def show_help(self):
-        messagebox.showinfo(
-            "How to Use This Launcher",
-            "1. Click Home (top of the sidebar) any time to return to the "
-            "welcome overview, or Apps for a dedicated list of every "
-            "interactive tool.\n"
-            "2. Click any other item in the sidebar to open it right here "
-            "in the app.\n"
-            "3. Items marked with ↗ are interactive tools that need real "
-            "JavaScript to run — they show an \"Open Tool\" button that opens "
-            "a separate window for that tool.\n"
-            "4. Press Enter in Search (or click 🔍) to see every match for "
-            "a word anywhere in the app — not just the sidebar list — or "
-            "use the ⟨ arrow at the top of the sidebar to collapse it out "
-            "of the way.\n"
-            "5. If you don't see a document you expect, ask an admin to add it "
-            "to the html folder, then click Refresh.\n"
-            "6. Click Settings (bottom of the sidebar) to change the color "
-            "theme, text size, startup page, or whether your username is "
-            "remembered on this computer.\n\n"
-            "Having trouble? Contact your office administrator.",
-        )
+    def _sign_out(self):
+        """Tears down the whole app UI and drops back to the login screen
+        -- the same teardown _rebuild_ui uses after a Settings change
+        (destroy everything under root, clean up the scroll bindings that
+        would otherwise leak, reset the white backdrop), just landing on
+        the login screen instead of rebuilding the signed-in layout.
+        Replaces the old 'How to Use This Launcher' button, which just
+        popped up a plain text messagebox of navigation tips."""
+        self.user_role = None
+        self._selected_path = None
+        self._last_search_query = ""
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        self._reset_stale_scroll_bindings(rearm_nav=False)
+        self.root.configure(fg_color=WHITE_BACKDROP)
+        self._show_login_screen()
 
 
 def run_webview_window(file_path: str, title: str):
