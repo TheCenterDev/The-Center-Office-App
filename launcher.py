@@ -436,6 +436,18 @@ def apply_theme(theme_name: str):
     globals().update(THEMES[resolve_theme(theme_name)])
 
 
+def is_dark_hex(hex_color: str) -> bool:
+    """True if a #rrggbb color reads as "dark" (perceptual luminance),
+    used to decide whether the sidebar header needs the white-silhouette
+    logo (see load_logo_image) instead of the real navy-and-cyan one."""
+    hex_color = hex_color.lstrip("#")
+    try:
+        r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    except (ValueError, IndexError):
+        return False
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 128
+
+
 FONT_SCALES = {"small": 0.9, "normal": 1.0, "large": 1.15, "xlarge": 1.3}
 FONT_SCALE_LABELS = {"small": "Small", "normal": "Normal", "large": "Large", "xlarge": "Extra Large"}
 FONT_SCALE = 1.0
@@ -466,6 +478,16 @@ SIDEBAR_TEXT = "#ffffff"
 SIDEBAR_TEXT_MUTED = "#9fd6f0"
 SIDEBAR_WIDTH = 220
 SIDEBAR_COLLAPSED_WIDTH = 40
+SIDEBAR_ANIMATION_MS = 220  # total duration of the collapse/expand animation
+SIDEBAR_ANIMATION_STEPS = 16  # more steps = smoother, at the cost of more .after() calls
+
+# A quick whole-window dim-and-restore played every time the visible page
+# changes (see _play_page_fade) -- the closest thing to a page-switch
+# "stinger" that's practical here, since stock Tk widgets have no
+# per-widget opacity to animate; only the root window does.
+PAGE_FADE_STEPS = 6
+PAGE_FADE_STEP_MS = 16
+PAGE_FADE_MIN_ALPHA = 0.55
 
 FONT_FAMILY = "Segoe UI"
 CODE_FONT_FAMILY = "Courier New"  # widely available on both macOS and Windows
@@ -832,6 +854,20 @@ class _GuideHTMLParser(html.parser.HTMLParser):
     def _start_runs(self):
         self._runs = []
 
+    def _p_is_nested(self):
+        """True if a <p> is nested inside something that already owns
+        its own runs list -- a note div, or a table cell/list item/
+        definition term/description. Real, hand-authored guide content
+        routinely wraps cell/item text in <p> (it's what Cocoa's HTML
+        export always does), and without this check that <p>'s own
+        open/close handling hijacks the container's runs entirely: its
+        text leaks out as a spurious extra top-level paragraph block,
+        and the actual container (table cell, list item, ...) ends up
+        empty. See handle_starttag/handle_endtag's "p" branches."""
+        if self._in_note:
+            return True
+        return any(t in ("td", "th", "li", "dt", "dd") for t, _attrs in self._tag_stack)
+
     # -- HTMLParser overrides ------------------------------------------
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -839,7 +875,8 @@ class _GuideHTMLParser(html.parser.HTMLParser):
             self._heading_tag = tag
             self._runs = []
         elif tag == "p":
-            self._start_runs()
+            if not self._p_is_nested():
+                self._start_runs()
         elif tag == "ul":
             self._list_items = []
         elif tag == "li":
@@ -878,7 +915,7 @@ class _GuideHTMLParser(html.parser.HTMLParser):
                 self.blocks.append({"type": self._heading_tag, "text": text})
             self._heading_tag = None
             self._runs = None
-        elif tag == "p" and self._runs is not None and not self._in_note:
+        elif tag == "p" and self._runs is not None and not self._p_is_nested():
             if any(t.strip() for t, _s, _h in self._runs):
                 self.blocks.append({"type": "p", "runs": self._runs})
             self._runs = None
@@ -965,23 +1002,33 @@ def discover_documents():
     return docs
 
 
-def load_logo_image(height):
+def load_logo_image(height, white=False):
     """Load a real logo from assets/ if one has been dropped in there.
 
     Sized by height, with width derived from the image's own aspect
     ratio — so a non-square logo (like The Center's wordmark-style
-    mark) isn't squashed or stretched into a square. Always drawn on a
-    white background (sidebar header and welcome screen are both
-    white), since the logo's navy ink would disappear against navy.
-    """
+    mark) isn't squashed or stretched into a square. Normally drawn in
+    its real navy-and-cyan ink, meant for a light-ish background (the
+    welcome screen, or the sidebar header when a light-ish theme is
+    active) — the navy would disappear against a dark background.
+
+    white=True instead recolors every visible pixel to solid white,
+    keeping the original alpha channel as a silhouette — used for the
+    sidebar header when a dark theme is active, so the logo actually
+    changes instead of sitting frozen while everything around it
+    re-themes (see _build_sidebar)."""
     if Image is None:
         return None
     for candidate in (ASSETS_DIR / "logo.png", ASSETS_DIR / "logo.jpg", ASSETS_DIR / "logo.jpeg"):
         if candidate.exists():
             try:
-                img = Image.open(candidate)
+                img = Image.open(candidate).convert("RGBA")
                 width_px, height_px = img.size
                 width = max(1, round(height * (width_px / height_px)))
+                if white:
+                    silhouette = Image.new("RGBA", img.size, (255, 255, 255, 0))
+                    silhouette.putalpha(img.getchannel("A"))
+                    img = silhouette
                 return ctk.CTkImage(light_image=img, dark_image=img, size=(width, height))
             except Exception:
                 pass
@@ -1092,6 +1139,7 @@ class LauncherApp:
         apply_font_scale(self.settings.get("font_scale", "normal"))
 
         self._sidebar_logo = load_logo_image(LOGO_HEIGHT)
+        self._sidebar_logo_white = load_logo_image(LOGO_HEIGHT, white=True)
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
         self._login_logo = load_logo_image(LOGIN_LOGO_HEIGHT)
         self._search_icon = build_search_icon(16, SIDEBAR_TEXT)
@@ -1413,20 +1461,24 @@ class LauncherApp:
         self.sidebar_content = ctk.CTkFrame(self.sidebar, fg_color=SIDEBAR_BG, corner_radius=0)
         self.sidebar_content.pack(fill="both", expand=True)
 
-        # Header always stays white (WHITE_BACKDROP, not the theme-variable
-        # BODY_BG) so the real navy-and-cyan logo stays readable regardless
-        # of theme — it would disappear if drawn directly on the navy
-        # sidebar, or wash out against a dark-mode background.
-        header = ctk.CTkFrame(self.sidebar_content, fg_color=WHITE_BACKDROP, corner_radius=0)
+        # The header band follows BODY_BG (the theme-variable global) so
+        # it actually re-themes along with the rest of the app, instead
+        # of sitting frozen white forever. The logo itself switches
+        # between its real navy-and-cyan ink (light-ish themes) and a
+        # white silhouette (see load_logo_image) on dark ones, since the
+        # navy ink alone would otherwise vanish against a dark header.
+        header_bg = BODY_BG
+        sidebar_logo = self._sidebar_logo_white if is_dark_hex(header_bg) else self._sidebar_logo
+        header = ctk.CTkFrame(self.sidebar_content, fg_color=header_bg, corner_radius=0)
         header.pack(fill="x")
-        header_inner = ctk.CTkFrame(header, fg_color=WHITE_BACKDROP)
+        header_inner = ctk.CTkFrame(header, fg_color=header_bg)
         header_inner.pack(padx=18, pady=18)
-        self._render_logo(header_inner, self._sidebar_logo, LOGO_SIZE, anchor="center")
+        self._render_logo(header_inner, sidebar_logo, LOGO_SIZE, anchor="center", bg_color=header_bg)
         ctk.CTkLabel(
-            header_inner, text=APP_NAME, font=F(14, "bold"), text_color=LOGIN_TEXT, fg_color=WHITE_BACKDROP
+            header_inner, text=APP_NAME, font=F(14, "bold"), text_color=TEXT_DARK, fg_color=header_bg
         ).pack(anchor="center", pady=(8, 0))
         ctk.CTkLabel(
-            header_inner, text=APP_TAGLINE, font=F(10), text_color=ACCENT, fg_color=WHITE_BACKDROP
+            header_inner, text=APP_TAGLINE, font=F(10), text_color=ACCENT, fg_color=header_bg
         ).pack(anchor="center")
 
         ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
@@ -1632,7 +1684,7 @@ class LauncherApp:
 
     def _toggle_sidebar(self):
         self._sidebar_expanded = not self._sidebar_expanded
-        self._apply_sidebar_state()
+        self._animate_sidebar(self._sidebar_expanded)
         self.settings["sidebar_expanded"] = self._sidebar_expanded
         save_settings(self.settings)
         if self.current_user is not None:
@@ -1640,11 +1692,13 @@ class LauncherApp:
             save_users(self.users)
 
     def _apply_sidebar_state(self):
-        """Applies self._sidebar_expanded to the already-built sidebar
-        widgets, without flipping it — used both by _toggle_sidebar and
-        right after _build_sidebar constructs everything in its default
+        """Instantly applies self._sidebar_expanded to the already-built
+        sidebar widgets, without flipping it or animating -- used right
+        after _build_sidebar constructs everything in its default
         (expanded) layout, so a collapsed state saved from a previous
-        launch (or restored via Settings) actually takes effect."""
+        launch (or restored via Settings) takes effect immediately on
+        load. _toggle_sidebar (an actual user click) uses the animated
+        _animate_sidebar instead — see there for why."""
         if self._sidebar_expanded:
             self.sidebar.configure(width=SIDEBAR_WIDTH)
             self.sidebar_content.pack(fill="both", expand=True)
@@ -1653,6 +1707,47 @@ class LauncherApp:
             self.sidebar_content.pack_forget()
             self.sidebar.configure(width=SIDEBAR_COLLAPSED_WIDTH)
             self.toggle_button.configure(text="⟩")
+
+    def _animate_sidebar(self, expanding: bool):
+        """Eases the sidebar open/closed instead of snapping instantly --
+        fast at the start, slowing to a stop at the end (ease-out cubic),
+        like a soft-close door or drawer. sidebar_content (the nav list,
+        search box, footer) is hidden immediately when collapsing and
+        shown only once the expand animation finishes, rather than
+        somewhere mid-resize -- squeezing real text/buttons into a
+        shrinking frame looks far worse than just letting the frame
+        resize around empty space. Guarded against a second click
+        interrupting an animation already in flight, and against the
+        sidebar being torn down (rebuild/sign-out) mid-animation."""
+        if getattr(self, "_sidebar_animating", False):
+            return
+        self._sidebar_animating = True
+        self.toggle_button.configure(text="⟨" if expanding else "⟩")
+        start_width = SIDEBAR_COLLAPSED_WIDTH if expanding else SIDEBAR_WIDTH
+        end_width = SIDEBAR_WIDTH if expanding else SIDEBAR_COLLAPSED_WIDTH
+        if not expanding:
+            self.sidebar_content.pack_forget()
+
+        steps = SIDEBAR_ANIMATION_STEPS
+        interval = max(1, SIDEBAR_ANIMATION_MS // steps)
+
+        def step(i=0):
+            try:
+                if i >= steps:
+                    self.sidebar.configure(width=end_width)
+                    if expanding:
+                        self.sidebar_content.pack(fill="both", expand=True)
+                    self._sidebar_animating = False
+                    return
+                t = (i + 1) / steps
+                eased = 1 - (1 - t) ** 3  # ease-out cubic: fast start, slow finish
+                width = round(start_width + (end_width - start_width) * eased)
+                self.sidebar.configure(width=width)
+                self.root.after(interval, lambda: step(i + 1))
+            except Exception:
+                self._sidebar_animating = False
+
+        step()
 
     def _build_sidebar_footer(self, sidebar):
         ctk.CTkFrame(sidebar, fg_color=SIDEBAR_DIVIDER, height=1, corner_radius=0).pack(fill="x")
@@ -1673,7 +1768,8 @@ class LauncherApp:
                 command=command,
             )
 
-        footer_button("Refresh", self.refresh_documents).pack(fill="x", pady=1)
+        self._refresh_button = footer_button("Refresh", self._refresh_with_feedback)
+        self._refresh_button.pack(fill="x", pady=1)
         self.settings_button = footer_button("Settings", self._show_settings)
         self.settings_button.pack(fill="x", pady=1)
         # Deferred to the next idle tick -- same fix as apply_and_rebuild
@@ -1689,18 +1785,23 @@ class LauncherApp:
         footer_button("Sign Out", lambda: self.root.after(1, self._sign_out)).pack(fill="x", pady=1)
         footer_button("Quit", self.root.destroy).pack(fill="x", pady=1)
 
-    def _render_logo(self, parent, logo_image, placeholder_size, anchor="w"):
+    def _render_logo(self, parent, logo_image, placeholder_size, anchor="w", bg_color=None):
         """Show a real logo if assets/logo.* exists, otherwise a clean
         rounded placeholder mark so the app still looks finished today.
-        Always drawn on WHITE_BACKDROP (fixed white, not the theme-variable
-        BODY_BG) — see load_logo_image — since the logo's navy ink needs a
-        light background to read regardless of the active theme, and every
-        caller now wraps this in a WHITE_BACKDROP-colored holder frame to
-        match. `anchor` controls horizontal alignment within `parent`: "w"
-        for the left-aligned Home-page usage, "center" for the sidebar
+        Drawn on bg_color, defaulting to WHITE_BACKDROP (fixed white, not
+        the theme-variable BODY_BG) — see load_logo_image — since the
+        real navy-and-cyan logo needs a light background to read. The
+        sidebar header is the one caller that passes its own bg_color
+        (BODY_BG) instead, since it also switches to the white-silhouette
+        logo variant on dark themes rather than forcing a fixed-white
+        chip — see _build_sidebar. Every other caller just wraps this in
+        a WHITE_BACKDROP-colored holder frame to match the default.
+        `anchor` controls horizontal alignment within `parent`: "w" for
+        the left-aligned Home-page usage, "center" for the sidebar
         header and login/loading screens, where it should sit dead-center."""
+        bg_color = bg_color or WHITE_BACKDROP
         if logo_image is not None:
-            ctk.CTkLabel(parent, image=logo_image, text="", fg_color=WHITE_BACKDROP).pack(anchor=anchor)
+            ctk.CTkLabel(parent, image=logo_image, text="", fg_color=bg_color).pack(anchor=anchor)
             return
 
         ctk.CTkLabel(
@@ -1716,10 +1817,60 @@ class LauncherApp:
 
     # --------------------------------------------------------- behavior --
     def refresh_documents(self):
+        """Rescans html/ for new/removed/renamed files and re-renders
+        whatever's actually on screen right now -- not just the nav list
+        and Apps. Previously this only refreshed the list itself, which
+        is why picking up an edit made via "Edit This Page" (or dropping
+        in a new file) meant clicking away to another page and back
+        before the change actually showed up."""
         self.documents = discover_documents()
         self._render_nav_list()
         if self._selected_path == "apps":
             self._show_apps()
+        elif self._selected_path is None:
+            self._show_home()
+        elif isinstance(self._selected_path, Path):
+            match = next((d for d in self.documents if d[2] == self._selected_path), None)
+            if match:
+                _, title, path, is_program = match
+                self._select_document(path, title, is_program)
+            else:
+                # The file that was open got removed/renamed out from
+                # under it -- fall back rather than show a stale page.
+                self._show_home()
+
+    def _refresh_with_feedback(self):
+        """Wraps refresh_documents() with a brief, visible button-state
+        animation -- Refresh -> Refreshing... -> checkmark -> back to
+        Refresh -- so clicking it actually feels like it did something,
+        instead of the button just sitting there with no acknowledgment
+        while the page silently updates behind it."""
+        btn = getattr(self, "_refresh_button", None)
+        if btn is None:
+            self.refresh_documents()
+            return
+
+        def revert():
+            try:
+                btn.configure(text="Refresh", state="normal")
+            except Exception:
+                pass  # sidebar was rebuilt/torn down before this fired
+
+        def finish():
+            self.refresh_documents()
+            try:
+                btn.configure(text="✓ Refreshed", state="normal")
+                self.root.after(900, revert)
+            except Exception:
+                pass
+
+        try:
+            btn.configure(text="Refreshing…", state="disabled")
+        except Exception:
+            pass
+        # Tiny delay so "Refreshing..." actually has a moment to be seen
+        # even when the rescan+re-render itself is instant.
+        self.root.after(150, finish)
 
     def _render_nav_list(self):
         """Populates the sidebar's document list. Always shows every
@@ -2059,9 +2210,47 @@ class LauncherApp:
                 pass
 
     def _clear_content(self):
+        self._play_page_fade()
         for widget in self.content_frame.winfo_children():
             widget.destroy()
         self._reset_stale_scroll_bindings(rearm_nav=True)
+
+    def _play_page_fade(self):
+        """A quick dim-and-restore of the whole window, played every time
+        a new page is about to render -- the "stinger" transition between
+        pages. Individual CTk widgets have no real opacity to animate in
+        stock Tk, but the root window itself supports it on macOS/Windows
+        via wm_attributes("-alpha", ...), so that's what this fades
+        instead -- the whole window dims slightly and comes back, rather
+        than just the content area. Purely cosmetic and best-effort:
+        wrapped in try/except throughout since some Linux window managers
+        ignore -alpha entirely, which should just mean no visible effect
+        rather than an error, and guarded against overlapping runs (e.g.
+        typing quickly into search, which calls this on every keystroke)
+        stacking multiple animations on top of each other."""
+        if getattr(self, "_fade_animating", False):
+            return
+        try:
+            self.root.attributes("-alpha", 1.0)
+        except Exception:
+            return  # this platform/window manager doesn't support it at all
+
+        self._fade_animating = True
+        down = [1.0 - (1.0 - PAGE_FADE_MIN_ALPHA) * (i / PAGE_FADE_STEPS) for i in range(PAGE_FADE_STEPS + 1)]
+        sequence = down + list(reversed(down))[1:]
+
+        def play(i=0):
+            try:
+                if i >= len(sequence):
+                    self.root.attributes("-alpha", 1.0)
+                    self._fade_animating = False
+                    return
+                self.root.attributes("-alpha", sequence[i])
+                self.root.after(PAGE_FADE_STEP_MS, lambda: play(i + 1))
+            except Exception:
+                self._fade_animating = False
+
+        play()
 
     def _content_header(self, title: str, extra_button=None, extra_buttons=None):
         """Shared header row (title, optional right-side button(s)) used
@@ -3083,12 +3272,24 @@ class LauncherApp:
         """Shared link-click handler for natively-rendered guide content.
         Mirrors what tkinterweb's on_link_click used to do: local .skill
         files get the native Save-As + download animation treatment (see
-        _download_skill_file), mailto/http(s) links open normally, and
-        any other relative link is resolved against the guide's own
-        folder and opened externally if it exists."""
+        _download_skill_file), http(s) links open normally, and any other
+        relative link is resolved against the guide's own folder and
+        opened externally if it exists. mailto: links are special-cased
+        to open a Gmail compose window in the browser instead of
+        webbrowser.open()'s normal behavior of handing off to whatever
+        the OS's default mail app is -- every address in this app is a
+        real @thecentercc.com Google Workspace account, so Gmail is
+        almost always what's actually wanted."""
         if not href:
             return
-        if href.startswith("mailto:") or href.startswith("http://") or href.startswith("https://"):
+        if href.startswith("mailto:"):
+            address = href[len("mailto:"):].split("?", 1)[0].strip()
+            if address:
+                webbrowser.open(
+                    "https://mail.google.com/mail/?view=cm&fs=1&to=" + urllib.parse.quote(address)
+                )
+            return
+        if href.startswith("http://") or href.startswith("https://"):
             webbrowser.open(href)
             return
         skill_path = self._resolve_local_download_path(href, base_dir)
@@ -3106,7 +3307,7 @@ class LauncherApp:
         except Exception:
             pass
 
-    def _build_rich_text(self, parent, runs, base_dir: Path, font_size=12, base_color=None, bg_color=None):
+    def _build_rich_text(self, parent, runs, base_dir: Path, font_size=12, base_color=None, bg_color=None, width_chars=None):
         """Renders a list of (text, styleset, href) runs as one flowing,
         read-only paragraph able to mix bold/link/placeholder styling
         inline -- e.g. "...guessing. Download Skill" or "Brad Boyles —
@@ -3115,15 +3316,31 @@ class LauncherApp:
         by a bare tkinter.Text widget (CTk has no rich-text widget of its
         own), styled to sit invisibly among the CTk widgets around it and
         auto-sized to its wrapped line count so it behaves like a normal
-        paragraph rather than a fixed-size box."""
+        paragraph rather than a fixed-size box.
+
+        width_chars is left unset (None) for normal paragraph flow --
+        those are packed with fill="x", which stretches/shrinks a Text
+        widget to its parent's actual width regardless of the widget's
+        own naturally-requested size. Table cells (see
+        _render_guide_table) pass an explicit width_chars instead, since
+        those live in a grid layout, where an unset width lets a Text
+        widget's ~80-character default request blow the column out far
+        wider than intended."""
         bg_color = bg_color or BODY_BG
         base_color = base_color or TEXT_MUTED
 
-        widget = tk.Text(
-            parent, wrap="word", background=bg_color, foreground=base_color,
+        text_kwargs = dict(
+            wrap="word", background=bg_color, foreground=base_color,
             borderwidth=0, highlightthickness=0, font=F(font_size), padx=0, pady=0,
-            cursor="arrow", takefocus=0, height=1,
+            # "xterm" is Tk's cross-platform I-beam cursor -- signals this
+            # text can be selected/copied, the same way it would on a
+            # webpage. Individual links override this to a hand cursor
+            # on hover (see the tag_bind calls below).
+            cursor="xterm", takefocus=0, height=1,
         )
+        if width_chars is not None:
+            text_kwargs["width"] = width_chars
+        widget = tk.Text(parent, **text_kwargs)
         widget.tag_configure("bold", font=F(font_size, "bold"), foreground=TEXT_DARK)
         widget.tag_configure("italic", font=(FONT_FAMILY, F(font_size)[1], "italic"))
         widget.tag_configure(
@@ -3153,7 +3370,7 @@ class LauncherApp:
             hand_cursor = "pointinghand" if sys.platform == "darwin" else "hand2"
             widget.tag_bind("link", "<Button-1>", on_click)
             widget.tag_bind("link", "<Enter>", lambda e: widget.configure(cursor=hand_cursor))
-            widget.tag_bind("link", "<Leave>", lambda e: widget.configure(cursor="arrow"))
+            widget.tag_bind("link", "<Leave>", lambda e: widget.configure(cursor="xterm"))
 
         make_text_readonly(widget)
         widget.pack(fill="x", anchor="w")
@@ -3170,7 +3387,12 @@ class LauncherApp:
         widget.after(30, resize)
         return widget
 
-    def _render_guide_table(self, parent, rows):
+    def _render_guide_table(self, parent, rows, base_dir: Path):
+        """Renders each cell through _build_rich_text instead of a plain
+        CTkLabel, so a link inside a table cell (e.g. a Contacts email)
+        is actually clickable, selectable, and copyable -- the same as
+        link/body text anywhere else in a guide. Plain CTkLabel discarded
+        the href entirely, which is why table links never worked."""
         if not rows:
             return
         col_count = max((len(cells) for _is_header, cells in rows), default=0)
@@ -3186,19 +3408,29 @@ class LauncherApp:
             row_bg = ACCENT_SOFT if is_header else CARD_BG
             for col_idx in range(col_count):
                 cell_runs = cells[col_idx] if col_idx < len(cells) else []
-                cell_text = "".join(t for t, _s, _h in cell_runs).strip()
-                is_fill = any("fill" in s for _t, s, _h in cell_runs)
-                cell_color = "#b45309" if is_fill else (TEXT_DARK if is_header else TEXT_MUTED)
-                ctk.CTkLabel(
-                    table_card,
-                    text=cell_text or "—",
-                    font=F(12, "bold" if is_header else None),
-                    text_color=cell_color,
-                    fg_color=row_bg,
-                    anchor="w",
-                    justify="left",
-                    wraplength=200,
-                ).grid(row=row_idx, column=col_idx, sticky="nsew", padx=12, pady=8)
+                cell_frame = ctk.CTkFrame(table_card, fg_color=row_bg)
+                cell_frame.grid(row=row_idx, column=col_idx, sticky="nsew", padx=12, pady=8)
+                if any(t.strip() for t, _s, _h in cell_runs):
+                    if is_header:
+                        # Header rows read as headers regardless of
+                        # whether the source table actually wrapped them
+                        # in <b> -- _build_rich_text's "bold" tag is
+                        # otherwise only driven by the source markup.
+                        cell_runs = [(t, s | {"bold"}, h) for t, s, h in cell_runs]
+                    self._build_rich_text(
+                        cell_frame, cell_runs, base_dir, font_size=12,
+                        base_color=(TEXT_DARK if is_header else TEXT_MUTED), bg_color=row_bg,
+                        # Explicit narrow width -- see _build_rich_text's
+                        # docstring on why this matters inside a grid
+                        # layout specifically. Roughly matches the old
+                        # wraplength=200 (in px) this replaced.
+                        width_chars=24,
+                    )
+                else:
+                    ctk.CTkLabel(
+                        cell_frame, text="—", font=F(12), text_color=TEXT_MUTED,
+                        fg_color=row_bg, anchor="w",
+                    ).pack(anchor="w")
 
     def _render_guide_blocks(self, parent, blocks: list, base_dir: Path):
         """Draws parsed guide blocks (see _GuideHTMLParser) using the same
@@ -3248,7 +3480,7 @@ class LauncherApp:
                     desc_wrap.pack(fill="x", anchor="w")
                     self._build_rich_text(desc_wrap, desc_runs, base_dir, font_size=12, base_color=TEXT_MUTED, bg_color=BODY_BG)
             elif kind == "table":
-                self._render_guide_table(parent, block["rows"])
+                self._render_guide_table(parent, block["rows"], base_dir)
             elif kind == "note":
                 note_card = ctk.CTkFrame(parent, fg_color=ACCENT_SOFT, corner_radius=10)
                 note_card.pack(fill="x", pady=(16, 4))
