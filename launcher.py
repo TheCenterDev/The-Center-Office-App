@@ -498,14 +498,14 @@ SIDEBAR_COLLAPSED_WIDTH = 40
 SIDEBAR_ANIMATION_MS = 220  # total duration of the collapse/expand animation
 SIDEBAR_ANIMATION_STEPS = 16  # more steps = smoother, at the cost of more .after() calls
 
-# A quick dim-and-restore played over the content area only every time
-# the visible page changes (see _play_page_fade) -- the closest thing to
-# a page-switch "stinger" that's practical here, since stock Tk widgets
-# have no real opacity to animate. Faked instead by blending an overlay
-# frame's own color toward black and back.
+# A quick dim-and-restore played over the content area only, and only
+# when actually navigating to a different page (see _clear_content) --
+# the closest thing to a page-switch "stinger" that's practical here,
+# since stock Tk widgets have no real opacity to animate. Faked instead
+# by blending an overlay frame's own color toward white and back.
 PAGE_FADE_STEPS = 6
 PAGE_FADE_STEP_MS = 16
-PAGE_FADE_DIM_AMOUNT = 0.28  # how far toward black the dim step goes, 0-1
+PAGE_FADE_DIM_AMOUNT = 0.28  # how far toward white the fade step goes, 0-1
 
 FONT_FAMILY = "Segoe UI"
 CODE_FONT_FAMILY = "Courier New"  # widely available on both macOS and Windows
@@ -1135,6 +1135,10 @@ class LauncherApp:
         self._nav_buttons = {}  # path -> CTkButton, for highlighting the active row
         self._selected_path = None  # None = Home, "apps" = Apps, "settings" = Settings,
                                      # "search" = search results, else a document Path
+        self._last_rendered_path = object()  # unique sentinel -- never equals a real
+                                              # _selected_path, so the very first page
+                                              # render always counts as "navigation"
+                                              # (see _clear_content / _play_page_fade)
         self._last_search_query = ""
         self.home_button = None
         self.apps_button = None
@@ -2228,7 +2232,18 @@ class LauncherApp:
                 pass
 
     def _clear_content(self):
-        overlay = self._play_page_fade()
+        # self._selected_path is already set to the page *about to*
+        # render by the time any _show_* method calls this (every one of
+        # them sets it before calling _clear_content) -- comparing it
+        # against what was last actually rendered is how the fade tells
+        # real navigation (Home -> Apps, one guide -> another, ...) apart
+        # from the same page just redrawing itself in place (Team after
+        # a password change, Settings after a theme change, Refresh,
+        # search-as-you-type on every keystroke, ...), which shouldn't
+        # replay the transition at all.
+        is_navigation = self._selected_path != self._last_rendered_path
+        overlay = self._play_page_fade() if is_navigation else None
+        self._last_rendered_path = self._selected_path
         for widget in self.content_frame.winfo_children():
             if widget is overlay:
                 continue
@@ -2237,11 +2252,12 @@ class LauncherApp:
 
     def _play_page_fade(self):
         """A quick dim-and-restore played over just the content area (not
-        the sidebar) every time a new page is about to render -- the
+        the sidebar), only when actually navigating to a different page
+        (see the is_navigation check in _clear_content) -- the
         page-switch "stinger". Stock Tk widgets have no real per-widget
         opacity to animate, so this fakes it: a solid overlay frame is
         placed directly over content_frame *before* the old page's
-        widgets are destroyed, its own color blended toward black and
+        widgets are destroyed, its own color blended toward white and
         back (see mix_rgb) instead of a true fade, and it calls
         overlay.lift() on every step so it stays on top of whatever the
         caller builds underneath it in the meantime -- the destroy-and-
@@ -2249,8 +2265,7 @@ class LauncherApp:
         animation step firing is completely hidden beneath it. Returns
         the overlay widget so _clear_content's cleanup loop can skip
         destroying it out from under the animation. Guarded against
-        overlapping runs (e.g. typing quickly into search, which calls
-        this on every keystroke) stacking multiple animations at once."""
+        overlapping runs stacking multiple animations at once."""
         if getattr(self, "_fade_animating", False):
             return None
         try:
@@ -2264,7 +2279,12 @@ class LauncherApp:
 
         self._fade_animating = True
         base_rgb = hex_to_rgb(BODY_BG)
-        dim_rgb = mix_rgb(base_rgb, (0, 0, 0), PAGE_FADE_DIM_AMOUNT)
+        # Nothing is lighter than pure white, so flashing toward (255, 255,
+        # 255) is invisible on the Light theme, whose background already
+        # is white -- fall back to a soft neutral gray in that case so the
+        # flash still reads instead of silently disappearing.
+        flash_rgb = (235, 235, 235) if sum(255 - c for c in base_rgb) < 30 else (255, 255, 255)
+        dim_rgb = mix_rgb(base_rgb, flash_rgb, PAGE_FADE_DIM_AMOUNT)
         down = [rgb_to_hex(mix_rgb(base_rgb, dim_rgb, i / PAGE_FADE_STEPS)) for i in range(PAGE_FADE_STEPS + 1)]
         sequence = down + list(reversed(down))[1:]
 
