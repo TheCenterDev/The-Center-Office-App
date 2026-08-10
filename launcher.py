@@ -221,6 +221,132 @@ try:
 except Exception:
     pass
 
+# ---- patch every scrollbar app-wide to auto-hide when it isn't needed,
+# and to fade out when idle at the top otherwise.
+# CustomTkinter's CTkScrollbar always draws a full-length thumb the
+# moment a CTkScrollableFrame is created, even when the content already
+# fits with nothing to scroll -- there's no built-in "hide if unneeded"
+# behavior the way a classic Tk scrollbar can have. That's the
+# always-visible-but-never-usable scrollbar on shorter pages.
+#
+# This patches CTkScrollbar.set() (called every time the scroll
+# position/range changes) to:
+#   - hide the scrollbar entirely whenever the visible range already
+#     covers the whole content (nothing to scroll, ever, regardless of
+#     activity)
+#   - otherwise show it immediately (scrolling just happened, or the
+#     page just loaded) and, once idle for a moment, fade it back out
+#     -- but only once the view is back at the very top; if you've
+#     scrolled down, it stays put as a position indicator rather than
+#     disappearing while you're mid-page
+#   - hovering directly over the scrollbar keeps it visible and pauses
+#     the idle timer, so it doesn't vanish out from under the cursor
+try:
+    _SCROLLBAR_IDLE_HIDE_MS = 900
+
+    _original_scrollbar_init = ctk.CTkScrollbar.__init__
+
+    def _patched_scrollbar_init(self, *args, **kwargs):
+        _original_scrollbar_init(self, *args, **kwargs)
+        self._auto_hide_job = None
+        self._auto_hide_hovering = False
+        self._auto_hide_visible = True
+        self._auto_hide_at_top = True
+        try:
+            self._canvas.bind("<Enter>", lambda e: self._scrollbar_auto_hide_enter(), add=True)
+            self._canvas.bind("<Leave>", lambda e: self._scrollbar_auto_hide_leave(), add=True)
+        except Exception:
+            pass
+
+    def _scrollbar_auto_hide_reveal(self):
+        if not self.winfo_exists():
+            return
+        if self._auto_hide_job is not None:
+            try:
+                self.after_cancel(self._auto_hide_job)
+            except Exception:
+                pass
+            self._auto_hide_job = None
+        if not self._auto_hide_visible:
+            try:
+                self.grid()
+            except Exception:
+                pass
+            self._auto_hide_visible = True
+
+    def _scrollbar_auto_hide_conceal(self):
+        if not self.winfo_exists():
+            return
+        self._auto_hide_job = None
+        if self._auto_hide_hovering:
+            return
+        if self._auto_hide_visible:
+            try:
+                self.grid_remove()
+            except Exception:
+                pass
+            self._auto_hide_visible = False
+
+    def _scrollbar_auto_hide_schedule(self):
+        if not self.winfo_exists():
+            return
+        if self._auto_hide_job is not None:
+            try:
+                self.after_cancel(self._auto_hide_job)
+            except Exception:
+                pass
+        self._auto_hide_job = self.after(_SCROLLBAR_IDLE_HIDE_MS, lambda: self._scrollbar_auto_hide_conceal())
+
+    def _scrollbar_auto_hide_enter(self):
+        self._auto_hide_hovering = True
+        self._scrollbar_auto_hide_reveal()
+
+    def _scrollbar_auto_hide_leave(self):
+        self._auto_hide_hovering = False
+        if self._auto_hide_at_top:
+            self._scrollbar_auto_hide_schedule()
+
+    _original_scrollbar_set = ctk.CTkScrollbar.set
+
+    def _patched_scrollbar_set(self, start_value, end_value):
+        _original_scrollbar_set(self, start_value, end_value)
+        try:
+            start_f, end_f = float(start_value), float(end_value)
+        except (TypeError, ValueError):
+            start_f, end_f = 0.0, 1.0
+
+        if end_f - start_f >= 0.999:
+            # Nothing to scroll, ever -- always hidden, no timers.
+            self._auto_hide_at_top = True
+            if self._auto_hide_job is not None:
+                try:
+                    self.after_cancel(self._auto_hide_job)
+                except Exception:
+                    pass
+                self._auto_hide_job = None
+            if self._auto_hide_visible:
+                try:
+                    self.grid_remove()
+                except Exception:
+                    pass
+                self._auto_hide_visible = False
+            return
+
+        self._auto_hide_at_top = start_f <= 0.001
+        self._scrollbar_auto_hide_reveal()
+        if self._auto_hide_at_top and not self._auto_hide_hovering:
+            self._scrollbar_auto_hide_schedule()
+
+    ctk.CTkScrollbar.__init__ = _patched_scrollbar_init
+    ctk.CTkScrollbar._scrollbar_auto_hide_reveal = _scrollbar_auto_hide_reveal
+    ctk.CTkScrollbar._scrollbar_auto_hide_conceal = _scrollbar_auto_hide_conceal
+    ctk.CTkScrollbar._scrollbar_auto_hide_schedule = _scrollbar_auto_hide_schedule
+    ctk.CTkScrollbar._scrollbar_auto_hide_enter = _scrollbar_auto_hide_enter
+    ctk.CTkScrollbar._scrollbar_auto_hide_leave = _scrollbar_auto_hide_leave
+    ctk.CTkScrollbar.set = _patched_scrollbar_set
+except Exception:
+    pass
+
 try:
     from PIL import Image
 except ImportError:
@@ -1111,33 +1237,62 @@ class LauncherApp:
         # text inside every guide and app, not just what's listed here.
         search_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
         search_row.pack(fill="x", padx=12, pady=12)
+
+        # The entry sits in its own wrapper so the × clear button can be
+        # placed as an overlay on top of the entry's own right edge
+        # (via place(in_=...)) instead of packed as a separate block
+        # beside it -- previously the entry, ×, and 🔍 were three
+        # same-colored blocks blending into the dark sidebar with no
+        # clear boundary, which is why the search box was hard to even
+        # see. A visible border now marks its edges, and the × only
+        # appears once there's actually something to clear.
+        entry_wrap = ctk.CTkFrame(search_row, fg_color=SIDEBAR_BG)
+        entry_wrap.pack(side="left", fill="x", expand=True)
+
         self.search_var = StringVar()
         self.search_entry = ctk.CTkEntry(
-            search_row,
+            entry_wrap,
             textvariable=self.search_var,
             placeholder_text="Search…",
             font=F(12),
             height=32,
             corner_radius=8,
             fg_color=SIDEBAR_HOVER,
-            border_color=SIDEBAR_DIVIDER,
+            border_width=1,
+            border_color=SIDEBAR_TEXT_MUTED,
             text_color=SIDEBAR_TEXT,
             placeholder_text_color=SIDEBAR_TEXT_MUTED,
         )
-        self.search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry.pack(fill="x")
         self.search_entry.bind("<Return>", lambda _e: self._perform_search())
-        ctk.CTkButton(
-            search_row,
+
+        # Backed with the entry's own fill color so typed text that runs
+        # this far right is cleanly covered rather than visually
+        # colliding with the × -- Tkinter has no built-in way to fade
+        # text out with a gradient the way a browser search box can, so
+        # this is the closest practical equivalent.
+        self.search_clear_button = ctk.CTkButton(
+            entry_wrap,
             text="×",
-            width=26,
-            height=32,
-            corner_radius=8,
+            width=20,
+            height=20,
+            corner_radius=6,
             fg_color=SIDEBAR_HOVER,
             hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT_MUTED,
-            font=F(14, "bold"),
+            font=F(13, "bold"),
             command=self._clear_search,
-        ).pack(side="left", padx=(6, 0))
+        )
+
+        def _update_search_clear_visibility(*_args):
+            if self.search_var.get():
+                self.search_clear_button.place(in_=self.search_entry, relx=1.0, rely=0.5, anchor="e", x=-4)
+            else:
+                self.search_clear_button.place_forget()
+
+        self.search_var.trace_add("write", _update_search_clear_visibility)
+        _update_search_clear_visibility()
+
         ctk.CTkButton(
             search_row,
             text="🔍",
