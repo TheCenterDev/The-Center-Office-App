@@ -1292,6 +1292,16 @@ class LauncherApp:
             textvariable=self.search_var,
             placeholder_text="Search…",
             font=F(12),
+            # CTkEntry defaults to width=140 when not given -- combined
+            # with the sidebar's fixed 220px width, box's border, the
+            # ×'s permanently reserved slot, and the 🔍 button next to
+            # it, that default alone was already wider than the space
+            # available, which is why the box kept overflowing and
+            # shoving the 🔍 button out. width=1 here isn't literal --
+            # it just drops the entry's own oversized minimum so
+            # fill="x"/expand=True (below) are what actually size it,
+            # based on whatever room box really has.
+            width=1,
             height=30,
             corner_radius=0,
             fg_color="transparent",
