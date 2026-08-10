@@ -2426,29 +2426,48 @@ class LauncherApp:
         add_role_var = StringVar(value=ROLE_LABELS["staff"])
         add_status_var = StringVar()
 
-        def add_field(var, placeholder, width):
-            return ctk.CTkEntry(
-                add_row, textvariable=var, placeholder_text=placeholder, font=F(12),
-                height=32, corner_radius=8, width=width, fg_color=BODY_BG,
-                border_color=BORDER, text_color=TEXT_DARK,
-            )
+        # Each field gets its own small grey caption above it (Name /
+        # Email / Password / Role) rather than relying on placeholder
+        # text alone to convey what goes where -- and Role is a real
+        # dropdown (CTkOptionMenu), not a text box, with an accent-
+        # colored button segment so it's unmistakably a dropdown rather
+        # than looking like just another empty entry.
+        def field_group(label_text):
+            group = ctk.CTkFrame(add_row, fg_color=CARD_BG)
+            group.pack(side="left", padx=(0, 10))
+            ctk.CTkLabel(
+                group, text=label_text, font=F(10, "bold"), text_color=TEXT_MUTED, fg_color=CARD_BG, anchor="w"
+            ).pack(anchor="w", pady=(0, 3))
+            return group
 
-        add_field(add_name_var, "Full name", 160).pack(side="left", padx=(0, 8))
-        add_field(add_email_var, f"name@{ALLOWED_EMAIL_DOMAIN}", 190).pack(side="left", padx=(0, 8))
-        add_field(add_password_var, "Password", 130).pack(side="left", padx=(0, 8))
+        def add_field(label_text, var, placeholder, width, mask=False):
+            group = field_group(label_text)
+            ctk.CTkEntry(
+                group, textvariable=var, placeholder_text=placeholder, font=F(12),
+                height=32, corner_radius=8, width=width, fg_color=BODY_BG,
+                border_color=BORDER, text_color=TEXT_DARK, placeholder_text_color=TEXT_MUTED,
+                show=("•" if mask else ""),
+            ).pack()
+
+        add_field("Name", add_name_var, "Full name", 150)
+        add_field("Email", add_email_var, f"name@{ALLOWED_EMAIL_DOMAIN}", 190)
+        add_field("Password", add_password_var, "Password", 130, mask=True)
+
+        role_group = field_group("Role")
         ctk.CTkOptionMenu(
-            add_row,
+            role_group,
             variable=add_role_var,
             values=[ROLE_LABELS[r] for r in ROLES],
-            width=100,
+            width=110,
             height=32,
             fg_color=BODY_BG,
-            button_color=BORDER,
-            button_hover_color=TEXT_MUTED,
+            button_color=ACCENT,
+            button_hover_color=TEXT_DARK,
             text_color=TEXT_DARK,
             dropdown_fg_color=CARD_BG,
             dropdown_text_color=TEXT_DARK,
-        ).pack(side="left")
+            dropdown_hover_color=ACCENT_SOFT,
+        ).pack()
 
         add_status_label = ctk.CTkLabel(
             add_inner, textvariable=add_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=CARD_BG
