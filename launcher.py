@@ -371,7 +371,7 @@ SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 SKILLS = [
     {
         "name": "Deposit Reconciliation",
-        "description": "Checks a deposit against the donor export and builds the Deposit Detail PDF once everything matches.",
+        "description": "Reconciles a QuickBooks bank deposit against a donor deposit-detail export, then compiles the organization's polished deposit-detail-and-summary PDF.",
         "prompts": [
             "Reconcile this deposit against QuickBooks.",
             "Here's the donor export and the QuickBooks deposit — do they match?",
@@ -381,7 +381,7 @@ SKILLS = [
     },
     {
         "name": "Financial Summary Email",
-        "description": "Drafts the monthly budget-vs-actual financial summary email, covering every required category.",
+        "description": "Drafts the monthly/YTD budget-vs-actual financial summary email for The Center for Whitley County Youth.",
         "prompts": [
             "Draft this month's financials email.",
             "Compile the budget vs actual email with these QuickBooks numbers.",
