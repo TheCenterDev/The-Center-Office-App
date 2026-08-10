@@ -448,6 +448,23 @@ def is_dark_hex(hex_color: str) -> bool:
     return (0.299 * r + 0.587 * g + 0.114 * b) < 128
 
 
+def hex_to_rgb(hex_color: str):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def rgb_to_hex(rgb) -> str:
+    return "#%02x%02x%02x" % tuple(max(0, min(255, round(c))) for c in rgb)
+
+
+def mix_rgb(a, b, t: float):
+    """Linear-interpolates between two (r, g, b) tuples at t in [0, 1] --
+    used to fake a "dim" transition (see _play_page_fade) by blending a
+    background color toward black and back, since stock Tk widgets have
+    no real opacity/alpha to animate."""
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
+
+
 FONT_SCALES = {"small": 0.9, "normal": 1.0, "large": 1.15, "xlarge": 1.3}
 FONT_SCALE_LABELS = {"small": "Small", "normal": "Normal", "large": "Large", "xlarge": "Extra Large"}
 FONT_SCALE = 1.0
@@ -481,13 +498,14 @@ SIDEBAR_COLLAPSED_WIDTH = 40
 SIDEBAR_ANIMATION_MS = 220  # total duration of the collapse/expand animation
 SIDEBAR_ANIMATION_STEPS = 16  # more steps = smoother, at the cost of more .after() calls
 
-# A quick whole-window dim-and-restore played every time the visible page
-# changes (see _play_page_fade) -- the closest thing to a page-switch
-# "stinger" that's practical here, since stock Tk widgets have no
-# per-widget opacity to animate; only the root window does.
+# A quick dim-and-restore played over the content area only every time
+# the visible page changes (see _play_page_fade) -- the closest thing to
+# a page-switch "stinger" that's practical here, since stock Tk widgets
+# have no real opacity to animate. Faked instead by blending an overlay
+# frame's own color toward black and back.
 PAGE_FADE_STEPS = 6
 PAGE_FADE_STEP_MS = 16
-PAGE_FADE_MIN_ALPHA = 0.55
+PAGE_FADE_DIM_AMOUNT = 0.28  # how far toward black the dim step goes, 0-1
 
 FONT_FAMILY = "Segoe UI"
 CODE_FONT_FAMILY = "Courier New"  # widely available on both macOS and Windows
@@ -2210,47 +2228,67 @@ class LauncherApp:
                 pass
 
     def _clear_content(self):
-        self._play_page_fade()
+        overlay = self._play_page_fade()
         for widget in self.content_frame.winfo_children():
+            if widget is overlay:
+                continue
             widget.destroy()
         self._reset_stale_scroll_bindings(rearm_nav=True)
 
     def _play_page_fade(self):
-        """A quick dim-and-restore of the whole window, played every time
-        a new page is about to render -- the "stinger" transition between
-        pages. Individual CTk widgets have no real opacity to animate in
-        stock Tk, but the root window itself supports it on macOS/Windows
-        via wm_attributes("-alpha", ...), so that's what this fades
-        instead -- the whole window dims slightly and comes back, rather
-        than just the content area. Purely cosmetic and best-effort:
-        wrapped in try/except throughout since some Linux window managers
-        ignore -alpha entirely, which should just mean no visible effect
-        rather than an error, and guarded against overlapping runs (e.g.
-        typing quickly into search, which calls this on every keystroke)
-        stacking multiple animations on top of each other."""
+        """A quick dim-and-restore played over just the content area (not
+        the sidebar) every time a new page is about to render -- the
+        page-switch "stinger". Stock Tk widgets have no real per-widget
+        opacity to animate, so this fakes it: a solid overlay frame is
+        placed directly over content_frame *before* the old page's
+        widgets are destroyed, its own color blended toward black and
+        back (see mix_rgb) instead of a true fade, and it calls
+        overlay.lift() on every step so it stays on top of whatever the
+        caller builds underneath it in the meantime -- the destroy-and-
+        rebuild that happens between this call returning and the first
+        animation step firing is completely hidden beneath it. Returns
+        the overlay widget so _clear_content's cleanup loop can skip
+        destroying it out from under the animation. Guarded against
+        overlapping runs (e.g. typing quickly into search, which calls
+        this on every keystroke) stacking multiple animations at once."""
         if getattr(self, "_fade_animating", False):
-            return
+            return None
         try:
-            self.root.attributes("-alpha", 1.0)
+            if not self.content_frame.winfo_exists():
+                return None
+            overlay = ctk.CTkFrame(self.content_frame, fg_color=BODY_BG, corner_radius=0)
+            overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+            overlay.lift()
         except Exception:
-            return  # this platform/window manager doesn't support it at all
+            return None
 
         self._fade_animating = True
-        down = [1.0 - (1.0 - PAGE_FADE_MIN_ALPHA) * (i / PAGE_FADE_STEPS) for i in range(PAGE_FADE_STEPS + 1)]
+        base_rgb = hex_to_rgb(BODY_BG)
+        dim_rgb = mix_rgb(base_rgb, (0, 0, 0), PAGE_FADE_DIM_AMOUNT)
+        down = [rgb_to_hex(mix_rgb(base_rgb, dim_rgb, i / PAGE_FADE_STEPS)) for i in range(PAGE_FADE_STEPS + 1)]
         sequence = down + list(reversed(down))[1:]
 
         def play(i=0):
             try:
-                if i >= len(sequence):
-                    self.root.attributes("-alpha", 1.0)
+                if not overlay.winfo_exists():
                     self._fade_animating = False
                     return
-                self.root.attributes("-alpha", sequence[i])
+                overlay.lift()
+                if i >= len(sequence):
+                    overlay.destroy()
+                    self._fade_animating = False
+                    return
+                overlay.configure(fg_color=sequence[i])
                 self.root.after(PAGE_FADE_STEP_MS, lambda: play(i + 1))
             except Exception:
+                try:
+                    overlay.destroy()
+                except Exception:
+                    pass
                 self._fade_animating = False
 
         play()
+        return overlay
 
     def _content_header(self, title: str, extra_button=None, extra_buttons=None):
         """Shared header row (title, optional right-side button(s)) used
