@@ -983,6 +983,28 @@ def build_search_icon(size=16, color="#ffffff"):
     return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
 
 
+def build_team_icon(size=16, color="#ffffff"):
+    """Two overlapping circle 'heads', for the Team button in Settings --
+    same reasoning as build_search_icon: a flat silhouette that matches
+    the button's own color instead of a colored emoji picture. The
+    smaller overlap (vs. two heavily-overlapping circles) is what keeps
+    it reading as two people rather than one blob."""
+    if Image is None or ImageDraw is None:
+        return None
+    scale = 4
+    big = size * scale
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    r = round(big * 0.28)
+    cy = round(big * 0.52)
+    left_cx = round(big * 0.34)
+    right_cx = round(big * 0.66)
+    draw.ellipse((right_cx - r, cy - r, right_cx + r, cy + r), fill=color)
+    draw.ellipse((left_cx - r, cy - r, left_cx + r, cy + r), fill=color)
+    img = img.resize((size, size), Image.LANCZOS)
+    return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
+
+
 class LauncherApp:
     def __init__(self, root: ctk.CTk):
         self.root = root
@@ -996,7 +1018,6 @@ class LauncherApp:
         self.apps_button = None
         self.skills_button = None
         self.settings_button = None
-        self.team_button = None
         self.user_role = None  # "director", "admin", or "staff" once logged in
         self.current_user = None  # the matched users.json record, or None if
                                    # logged in via one of the emergency shared logins
@@ -1011,6 +1032,7 @@ class LauncherApp:
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
         self._login_logo = load_logo_image(LOGIN_LOGO_HEIGHT)
         self._search_icon = build_search_icon(16, SIDEBAR_TEXT)
+        self._team_icon = build_team_icon(16, "#ffffff")
 
         # Deliberately always "light" here, regardless of the chosen theme.
         # Every color in this app is one of our own plain hex strings
@@ -1480,24 +1502,10 @@ class LauncherApp:
         )
         self.skills_button.pack(fill="x")
 
-        # Director-only — everyone else never sees this row at all,
-        # rather than seeing it disabled/greyed out.
-        if self.user_role == "director":
-            team_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
-            team_row.pack(fill="x", padx=6, pady=(0, 4))
-            self.team_button = ctk.CTkButton(
-                team_row,
-                text="Team",
-                anchor="w",
-                font=F(12, "bold"),
-                fg_color=SIDEBAR_BG,
-                hover_color=SIDEBAR_BUTTON_HOVER,
-                text_color=SIDEBAR_TEXT,
-                corner_radius=8,
-                height=36,
-                command=self._show_team,
-            )
-            self.team_button.pack(fill="x")
+        # Team is no longer a pinned sidebar row -- it's reached via a
+        # button inside Settings instead (see _show_settings), since it's
+        # a Director-only management page rather than something everyone
+        # navigates to often.
 
         self.nav_scroll = ctk.CTkScrollableFrame(
             self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0,
@@ -1857,11 +1865,6 @@ class LauncherApp:
             self.settings_button,
             fg_color=(SIDEBAR_ACTIVE if active_path == "settings" else "transparent"),
             text_color=(ACCENT if active_path == "settings" else SIDEBAR_TEXT_MUTED),
-        )
-        safe_configure(
-            self.team_button,
-            fg_color=(SIDEBAR_ACTIVE if active_path == "team" else SIDEBAR_BG),
-            text_color=(ACCENT if active_path == "team" else SIDEBAR_TEXT),
         )
         for path, btn in list(self._nav_buttons.items()):
             safe_configure(
@@ -2356,6 +2359,24 @@ class LauncherApp:
         )
         scroll.pack(fill="both", expand=True, padx=32, pady=28)
 
+        # Team is only ever reached from Settings now (see _show_settings),
+        # so "back" always means Settings specifically -- no need for a
+        # general navigation history for just one page. Deferred for the
+        # usual reason: this button's own click destroys the page it's on.
+        ctk.CTkButton(
+            scroll,
+            text="← Back to Settings",
+            font=F(11, "bold"),
+            fg_color="transparent",
+            hover_color=BORDER,
+            text_color=ACCENT,
+            border_width=0,
+            corner_radius=6,
+            height=26,
+            anchor="w",
+            command=lambda: self.root.after(1, self._show_settings),
+        ).pack(anchor="w", pady=(0, 10))
+
         ctk.CTkLabel(
             scroll, text="Team", font=F(19, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG
         ).pack(anchor="w")
@@ -2722,12 +2743,28 @@ class LauncherApp:
 
         if self.user_role == "director":
             section(
-                "Team Passwords",
-                "Every person's password is now managed from the Team page "
-                "(pinned near the top of the sidebar) instead of here — "
-                "open it to see the full roster, reveal or change anyone's "
+                "Team",
+                "See everyone with access, reveal or change anyone's "
                 "password, promote/demote, or remove access.",
             )
+            team_button_kwargs = dict(
+                text="Open Team",
+                font=F(12, "bold"),
+                fg_color=ACCENT,
+                hover_color=TEXT_DARK,
+                text_color="white",
+                corner_radius=8,
+                height=36,
+                # Deferred to the next idle tick -- same fix as
+                # apply_and_rebuild above and _sign_out: _show_team()
+                # destroys this whole page, including the very button
+                # whose click got us here.
+                command=lambda: self.root.after(1, self._show_team),
+            )
+            if self._team_icon is not None:
+                team_button_kwargs["image"] = self._team_icon
+                team_button_kwargs["compound"] = "left"
+            ctk.CTkButton(scroll, **team_button_kwargs).pack(anchor="w", pady=(6, 0))
 
         reset_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
         reset_row.pack(anchor="w", pady=(30, 0))
@@ -3224,7 +3261,6 @@ class LauncherApp:
         self.apps_button = None
         self.skills_button = None
         self.settings_button = None
-        self.team_button = None
         self._nav_buttons = {}
         for widget in self.root.winfo_children():
             widget.destroy()
