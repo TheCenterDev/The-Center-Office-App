@@ -2407,8 +2407,7 @@ class LauncherApp:
             password_change_section(
                 "Staff Login Password",
                 "Admin/Owner only. Sets the password staff use to sign in — "
-                "their username stays \"staff\". \"Reset to Defaults\" below "
-                "also resets this back to the original password.",
+                "their username stays \"staff\".",
                 "staff_password",
                 "staff password",
                 "Update Staff Password",
@@ -2418,16 +2417,14 @@ class LauncherApp:
             password_change_section(
                 "Admin Login Password",
                 "Owner only. Sets the password admin uses to sign in — "
-                "their username stays \"admin\". \"Reset to Defaults\" below "
-                "also resets this back to the original password.",
+                "their username stays \"admin\".",
                 "admin_password",
                 "admin password",
                 "Update Admin Password",
             )
             password_change_section(
                 "Owner Login Password",
-                "Your own password. \"Reset to Defaults\" below also resets "
-                "this back to the original password.",
+                "Your own password.",
                 "owner_password",
                 "owner password",
                 "Update Owner Password",
@@ -2478,26 +2475,21 @@ class LauncherApp:
         and shouldn't quietly disappear just because someone reset the
         theme back to Light.
 
-        Login passwords are handled the same way: "Reset to Defaults" is
-        for display preferences, and this button is visible to everyone
-        (including Staff), so it shouldn't silently undo a password
-        someone deliberately changed just because a different person
-        clicked it. Each credential is only actually reset here by the
-        same role that's allowed to change it in the first place —
-        Admin/Owner can reset the staff password (they can already
-        change it directly in this same page), only Owner can reset the
-        admin or owner password."""
+        Login passwords are handled the same way, but simpler: "Reset to
+        Defaults" is for display preferences only and is visible to
+        everyone (including Staff), so it never touches any of the three
+        login passwords, no matter who clicks it or what role they are.
+        Changing a password is only ever done deliberately, through its
+        own dedicated field above."""
         keep_username = self.settings.get("last_username", "")
         keep_staff_password = self.settings.get("staff_password", STAFF_PASSWORD)
         keep_admin_password = self.settings.get("admin_password", ADMIN_PASSWORD)
         keep_owner_password = self.settings.get("owner_password", OWNER_PASSWORD)
         self.settings = dict(DEFAULT_SETTINGS)
         self.settings["last_username"] = keep_username
-        if self.user_role not in ("admin", "owner"):
-            self.settings["staff_password"] = keep_staff_password
-        if self.user_role != "owner":
-            self.settings["admin_password"] = keep_admin_password
-            self.settings["owner_password"] = keep_owner_password
+        self.settings["staff_password"] = keep_staff_password
+        self.settings["admin_password"] = keep_admin_password
+        self.settings["owner_password"] = keep_owner_password
         save_settings(self.settings)
         apply_theme(self.settings["theme"])
         apply_font_scale(self.settings["font_scale"])
