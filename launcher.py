@@ -115,6 +115,56 @@ try:
 except Exception:
     pass
 
+# ---- patch mouse-wheel scrolling to feel smooth instead of "clicky".
+# CustomTkinter's own _mouse_wheel_all scrolls by calling
+# canvas.yview("scroll", N, "units"), which always snaps the view to a
+# multiple of a fixed pixel increment (8px per notch on Mac, 30px on
+# Linux, 1px on Windows -- see _set_scroll_increments). A single trackpad
+# swipe fires many of these events in quick succession, so every one of
+# them re-snapping to that grid is what reads as a series of small hops
+# rather than one continuous glide. This replacement computes the exact
+# same distance (same pixels-per-notch as CustomTkinter's own increments,
+# so overall scroll speed and direction are unchanged) but moves there
+# with a continuous fraction (yview_moveto/xview_moveto) instead of
+# grid-quantized units.
+try:
+    def _smooth_mouse_wheel_all(self, event):
+        if not self._check_if_valid_scroll(event.widget):
+            return
+
+        scroll_x = self._shift_pressed
+        canvas = self._parent_canvas
+        view = canvas.xview() if scroll_x else canvas.yview()
+        if view == (0.0, 1.0):
+            return
+
+        if sys.platform.startswith("win"):
+            units = -int(event.delta / 6)
+            increment = 1
+        elif sys.platform == "darwin":
+            units = -event.delta
+            increment = 4 if scroll_x else 8
+        else:
+            units = -1 if getattr(event, "num", 5) == 4 else 1
+            increment = 30
+
+        bbox = canvas.bbox("all")
+        if not bbox:
+            return
+        content_size = (bbox[2] - bbox[0]) if scroll_x else (bbox[3] - bbox[1])
+        if content_size <= 0:
+            return
+
+        new_start = max(0.0, min(1.0, view[0] + (units * increment) / content_size))
+        if scroll_x:
+            canvas.xview_moveto(new_start)
+        else:
+            canvas.yview_moveto(new_start)
+
+    ctk.CTkScrollableFrame._mouse_wheel_all = _smooth_mouse_wheel_all
+except Exception:
+    pass
+
 try:
     from PIL import Image
 except ImportError:
