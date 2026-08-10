@@ -348,9 +348,10 @@ except Exception:
     pass
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageDraw
 except ImportError:
     Image = None  # CustomTkinter installs Pillow automatically; this is a fallback.
+    ImageDraw = None
 
 try:
     from tkinterweb import HtmlFrame
@@ -892,6 +893,30 @@ def load_logo_image(height):
     return None
 
 
+def build_search_icon(size=16, color="#ffffff"):
+    """Draws a plain magnifying-glass silhouette (a lens circle + handle
+    line) instead of using the 🔍 emoji character. Emoji glyphs render as
+    small full-color pictures on macOS/Windows -- that's the "image" look
+    the sidebar's search button had -- rather than a flat icon that matches
+    the rest of the app's white-on-navy sidebar style. Drawn at 4x the
+    target size and downsampled with LANCZOS so the circle and line come
+    out smooth instead of jagged."""
+    if Image is None or ImageDraw is None:
+        return None
+    scale = 4
+    big = size * scale
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    line_w = max(1, round(big * 0.11))
+    lens_d = round(big * 0.62)
+    draw.ellipse((line_w, line_w, lens_d, lens_d), outline=color, width=line_w)
+    handle_start = (round(lens_d * 0.82), round(lens_d * 0.82))
+    handle_end = (big - line_w, big - line_w)
+    draw.line([handle_start, handle_end], fill=color, width=line_w)
+    img = img.resize((size, size), Image.LANCZOS)
+    return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
+
+
 class LauncherApp:
     def __init__(self, root: ctk.CTk):
         self.root = root
@@ -915,6 +940,7 @@ class LauncherApp:
         self._sidebar_logo = load_logo_image(LOGO_HEIGHT)
         self._welcome_logo = load_logo_image(WELCOME_LOGO_HEIGHT)
         self._login_logo = load_logo_image(LOGIN_LOGO_HEIGHT)
+        self._search_icon = build_search_icon(16, SIDEBAR_TEXT)
 
         # Deliberately always "light" here, regardless of the chosen theme.
         # Every color in this app is one of our own plain hex strings
@@ -1238,46 +1264,51 @@ class LauncherApp:
         search_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
         search_row.pack(fill="x", padx=12, pady=12)
 
-        # The entry sits in its own wrapper so the × clear button can be
-        # placed as an overlay on top of the entry's own right edge
-        # (via place(in_=...)) instead of packed as a separate block
-        # beside it -- previously the entry, ×, and 🔍 were three
-        # same-colored blocks blending into the dark sidebar with no
-        # clear boundary, which is why the search box was hard to even
-        # see. A visible border now marks its edges, and the × only
-        # appears once there's actually something to clear.
-        entry_wrap = ctk.CTkFrame(search_row, fg_color=SIDEBAR_BG)
-        entry_wrap.pack(side="left", fill="x", expand=True)
+        # The bordered container itself IS the search box; the entry and
+        # the × both live inside it as ordinary, normally-packed children
+        # with their own reserved space. An earlier version tried to
+        # overlay the × on top of the entry's own text via place(), with
+        # a same-color background standing in for a "fade" -- that never
+        # actually worked, because CTkEntry's inner text field is a real
+        # native text control that always draws its own contents
+        # regardless of sibling stacking order, so the overlay had no
+        # visible effect. Giving the × its own permanent slot means text
+        # can't ever reach it in the first place; the entry's native
+        # behavior already scrolls long text leftward as you type, the
+        # same way any OS or browser search box handles overflow, so
+        # there's nothing left to visually collide with the ×.
+        box = ctk.CTkFrame(
+            search_row,
+            fg_color=SIDEBAR_HOVER,
+            corner_radius=8,
+            border_width=1,
+            border_color=SIDEBAR_TEXT_MUTED,
+        )
+        box.pack(side="left", fill="x", expand=True)
 
         self.search_var = StringVar()
         self.search_entry = ctk.CTkEntry(
-            entry_wrap,
+            box,
             textvariable=self.search_var,
             placeholder_text="Search…",
             font=F(12),
-            height=32,
-            corner_radius=8,
-            fg_color=SIDEBAR_HOVER,
-            border_width=1,
-            border_color=SIDEBAR_TEXT_MUTED,
+            height=30,
+            corner_radius=0,
+            fg_color="transparent",
+            border_width=0,
             text_color=SIDEBAR_TEXT,
             placeholder_text_color=SIDEBAR_TEXT_MUTED,
         )
-        self.search_entry.pack(fill="x")
+        self.search_entry.pack(side="left", fill="both", expand=True, padx=(10, 2), pady=1)
         self.search_entry.bind("<Return>", lambda _e: self._perform_search())
 
-        # Backed with the entry's own fill color so typed text that runs
-        # this far right is cleanly covered rather than visually
-        # colliding with the × -- Tkinter has no built-in way to fade
-        # text out with a gradient the way a browser search box can, so
-        # this is the closest practical equivalent.
         self.search_clear_button = ctk.CTkButton(
-            entry_wrap,
+            box,
             text="×",
             width=20,
             height=20,
             corner_radius=6,
-            fg_color=SIDEBAR_HOVER,
+            fg_color="transparent",
             hover_color=SIDEBAR_BUTTON_HOVER,
             text_color=SIDEBAR_TEXT_MUTED,
             font=F(13, "bold"),
@@ -1286,25 +1317,33 @@ class LauncherApp:
 
         def _update_search_clear_visibility(*_args):
             if self.search_var.get():
-                self.search_clear_button.place(in_=self.search_entry, relx=1.0, rely=0.5, anchor="e", x=-4)
+                self.search_clear_button.pack(side="right", padx=(0, 6))
             else:
-                self.search_clear_button.place_forget()
+                self.search_clear_button.pack_forget()
 
         self.search_var.trace_add("write", _update_search_clear_visibility)
         _update_search_clear_visibility()
 
-        ctk.CTkButton(
-            search_row,
-            text="🔍",
+        # A drawn white silhouette (see build_search_icon) instead of the
+        # 🔍 emoji, which renders as a small full-color picture rather
+        # than a flat icon matching the rest of the sidebar. Falls back
+        # to the emoji only if Pillow isn't available at all.
+        search_button_kwargs = dict(
             width=32,
             height=32,
             corner_radius=8,
             fg_color=SIDEBAR_HOVER,
             hover_color=SIDEBAR_BUTTON_HOVER,
-            text_color=SIDEBAR_TEXT,
-            font=F(12),
             command=self._perform_search,
-        ).pack(side="left", padx=(6, 0))
+        )
+        if self._search_icon is not None:
+            search_button_kwargs["image"] = self._search_icon
+            search_button_kwargs["text"] = ""
+        else:
+            search_button_kwargs["text"] = "🔍"
+            search_button_kwargs["text_color"] = SIDEBAR_TEXT
+            search_button_kwargs["font"] = F(12)
+        ctk.CTkButton(search_row, **search_button_kwargs).pack(side="left", padx=(6, 0))
 
         apps_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
         apps_row.pack(fill="x", padx=6, pady=(0, 4))
@@ -1345,7 +1384,27 @@ class LauncherApp:
         )
         self.nav_scroll.pack(fill="both", expand=True, padx=6)
 
-        self._build_sidebar_footer(self.sidebar_content)
+        # The document-list buttons live in their own inner frame (instead
+        # of directly in nav_scroll) so _render_nav_list can safely clear
+        # and rebuild just that list on every refresh without touching the
+        # footer below it, which is built once and needs to survive.
+        self.nav_list_container = ctk.CTkFrame(self.nav_scroll, fg_color=SIDEBAR_BG)
+        self.nav_list_container.pack(fill="x")
+
+        # The footer (Refresh/Settings/Help/Quit) is packed inside the
+        # same scrollable nav_scroll, right after the document list --
+        # not as a separate fixed-height sibling below it. It used to
+        # sit outside the scroll area entirely, with a fixed minimum
+        # height; on a short/minimized window there wasn't enough room
+        # for the header, nav rows, search box, document list, AND the
+        # footer to all fit, so the footer's last items ("How to Use
+        # This Launcher", "Quit") got clipped off below the visible
+        # window with no way to reach them. Making it part of the single
+        # scrollable region means the whole sidebar scrolls as one unit
+        # when things don't fit, and the auto-hide scrollbar (see the
+        # CTkScrollbar patch above) only appears when that's actually
+        # needed.
+        self._build_sidebar_footer(self.nav_scroll)
 
         # _build_sidebar always constructs the expanded layout above;
         # apply a previously-saved collapsed state now that everything
@@ -1441,13 +1500,13 @@ class LauncherApp:
             if not d[3] and d[2].name.lower() not in SIDEBAR_HIDDEN_FILES
         ]
 
-        for widget in self.nav_scroll.winfo_children():
+        for widget in self.nav_list_container.winfo_children():
             widget.destroy()
         self._nav_buttons = {}
 
         if not self.filtered:
             ctk.CTkLabel(
-                self.nav_scroll,
+                self.nav_list_container,
                 text=f"No documents found yet.\nAdd .html files to:\n{HTML_DIR}",
                 font=F(11),
                 text_color=SIDEBAR_TEXT_MUTED,
@@ -1460,7 +1519,7 @@ class LauncherApp:
         for _key, title, path, is_program in self.filtered:
             label = f"{title}  ↗" if is_program else title
             btn = ctk.CTkButton(
-                self.nav_scroll,
+                self.nav_list_container,
                 text=label,
                 anchor="w",
                 font=F(12),
