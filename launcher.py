@@ -119,15 +119,64 @@ except Exception:
 # CustomTkinter's own _mouse_wheel_all scrolls by calling
 # canvas.yview("scroll", N, "units"), which always snaps the view to a
 # multiple of a fixed pixel increment (8px per notch on Mac, 30px on
-# Linux, 1px on Windows -- see _set_scroll_increments). A single trackpad
-# swipe fires many of these events in quick succession, so every one of
-# them re-snapping to that grid is what reads as a series of small hops
-# rather than one continuous glide. This replacement computes the exact
-# same distance (same pixels-per-notch as CustomTkinter's own increments,
-# so overall scroll speed and direction are unchanged) but moves there
-# with a continuous fraction (yview_moveto/xview_moveto) instead of
-# grid-quantized units.
+# Linux, 1px on Windows -- see _set_scroll_increments) in one instant
+# jump per event. A trackpad swipe fires many of these events in quick
+# succession, so each one independently teleporting to its own grid line
+# is what reads as a series of hard little hops rather than one glide.
+#
+# A first attempt just replaced the grid-snapped jump with an equal-size
+# instant jump computed as a continuous fraction -- same math, still one
+# instant teleport per event, so it didn't fix the feel (and a mismatch
+# between the live-recomputed bbox("all") and the canvas's actual
+# scrollregion could occasionally overshoot on top of that).
+#
+# This version instead treats every incoming wheel event as a nudge to a
+# running target position, and animates the visible position toward that
+# target in short, quick, eased steps (each step covers 55% of the
+# remaining distance, ticking every 8ms) rather than snapping straight
+# there. Multiple rapid events just extend the same in-flight animation
+# toward a new target instead of stacking separate jumps, which is what
+# turns a fast trackpad swipe into one continuous-looking glide instead
+# of repeated teleports. Reads the canvas's actual scrollregion (rather
+# than recomputing bbox live) so the distance-per-notch matches
+# CustomTkinter's own increments exactly, with no overshoot.
 try:
+    _SCROLL_EASE = 0.55       # fraction of remaining distance covered per tick
+    _SCROLL_TICK_MS = 8       # time between animation ticks
+    _SCROLL_SNAP_EPS = 0.0008  # close enough to the target to stop animating
+
+    def _ctk_scroll_axis_size(canvas, scroll_x):
+        try:
+            x1, y1, x2, y2 = (float(v) for v in str(canvas.cget("scrollregion")).split())
+            return (x2 - x1) if scroll_x else (y2 - y1)
+        except Exception:
+            pass
+        bbox = canvas.bbox("all")
+        if not bbox:
+            return 0
+        return (bbox[2] - bbox[0]) if scroll_x else (bbox[3] - bbox[1])
+
+    def _ctk_scroll_animate_step(self, axis_attr, job_attr):
+        canvas = self._parent_canvas
+        if not self.winfo_exists() or not canvas.winfo_exists():
+            setattr(self, job_attr, None)
+            return
+        scroll_x = axis_attr.endswith("_x")
+        target = getattr(self, axis_attr, None)
+        if target is None:
+            setattr(self, job_attr, None)
+            return
+        current = (canvas.xview() if scroll_x else canvas.yview())[0]
+        remaining = target - current
+        if abs(remaining) < _SCROLL_SNAP_EPS:
+            (canvas.xview_moveto if scroll_x else canvas.yview_moveto)(target)
+            setattr(self, axis_attr, None)
+            setattr(self, job_attr, None)
+            return
+        (canvas.xview_moveto if scroll_x else canvas.yview_moveto)(current + remaining * _SCROLL_EASE)
+        job = self.after(_SCROLL_TICK_MS, lambda: _ctk_scroll_animate_step(self, axis_attr, job_attr))
+        setattr(self, job_attr, job)
+
     def _smooth_mouse_wheel_all(self, event):
         if not self._check_if_valid_scroll(event.widget):
             return
@@ -148,18 +197,21 @@ try:
             units = -1 if getattr(event, "num", 5) == 4 else 1
             increment = 30
 
-        bbox = canvas.bbox("all")
-        if not bbox:
-            return
-        content_size = (bbox[2] - bbox[0]) if scroll_x else (bbox[3] - bbox[1])
+        content_size = _ctk_scroll_axis_size(canvas, scroll_x)
         if content_size <= 0:
             return
 
-        new_start = max(0.0, min(1.0, view[0] + (units * increment) / content_size))
-        if scroll_x:
-            canvas.xview_moveto(new_start)
-        else:
-            canvas.yview_moveto(new_start)
+        axis_attr = "_smooth_scroll_target_x" if scroll_x else "_smooth_scroll_target_y"
+        job_attr = "_smooth_scroll_job_x" if scroll_x else "_smooth_scroll_job_y"
+
+        base = getattr(self, axis_attr, None)
+        if base is None:
+            base = view[0]
+        new_target = max(0.0, min(1.0, base + (units * increment) / content_size))
+        setattr(self, axis_attr, new_target)
+
+        if getattr(self, job_attr, None) is None:
+            _ctk_scroll_animate_step(self, axis_attr, job_attr)
 
     ctk.CTkScrollableFrame._mouse_wheel_all = _smooth_mouse_wheel_all
 except Exception:
