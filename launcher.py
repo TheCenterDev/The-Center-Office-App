@@ -65,12 +65,14 @@ without installing Python.
 """
 
 import html
+import html.parser
 import json
 import re
 import shutil
 import subprocess
 import sys
 import time
+import tkinter as tk
 import traceback
 import urllib.parse
 import webbrowser
@@ -523,6 +525,167 @@ def extract_plain_text(path: Path) -> str:
     text = HTML_TAG_RE.sub(" ", raw)
     text = html.unescape(text)
     return WHITESPACE_RE.sub(" ", text).strip()
+
+
+class _GuideHTMLParser(html.parser.HTMLParser):
+    """Turns the small, hand-authored subset of HTML our guides actually
+    use into a plain list of block dicts that native CTk widgets can
+    render directly, instead of handing the raw file to tkinterweb.
+
+    tkinterweb's Tkhtml rendering engine isn't Retina-aware the way
+    CustomTkinter's own widgets are (see _show_guide), so guide pages
+    rendered through it look visibly softer than Home/Apps, which are
+    built entirely out of native CTk widgets. Since every guide we ship
+    is simple, hand-written HTML (headings, paragraphs, lists,
+    definition lists, one small table, and a handful of inline links),
+    parsing that ourselves and drawing it with the same native widgets
+    Home uses gets guides to the same visual quality, with the side
+    benefit of finally respecting the Light/Dark/Eye Comfort theme
+    (tkinterweb only ever used the guide's own hardcoded CSS colors).
+
+    Only understands the tags our guides use. Anything else it doesn't
+    recognize is simply ignored at the tag level (its text content still
+    comes through via handle_data) rather than raising, so an unexpected
+    tag degrades gracefully instead of breaking the whole page."""
+
+    _INLINE_STYLE_TAGS = {"strong": "bold", "b": "bold", "em": "italic", "i": "italic", "code": "code"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.blocks = []
+        self._tag_stack = []       # list of (tag, attrs) currently open
+        self._runs = None          # list of (text, styleset, href) while inside a run-collecting element
+        self._heading_tag = None
+        self._list_items = None    # list of run-lists while inside <ul>
+        self._dl_items = None      # list of [term_runs, desc_runs] while inside <dl>
+        self._dl_current = None    # the in-progress [term_runs, desc_runs] pair
+        self._table_rows = None    # list of (is_header, [cell_runs, ...]) while inside <table>
+        self._table_current_row = None
+        self._table_row_is_header = False
+        self._in_note = False
+
+    # -- helpers ------------------------------------------------------
+    def _current_style_and_href(self):
+        style = set()
+        href = None
+        for tag, attrs in self._tag_stack:
+            mapped = self._INLINE_STYLE_TAGS.get(tag)
+            if mapped:
+                style.add(mapped)
+            if tag == "span" and "fill" in (attrs.get("class") or ""):
+                style.add("fill")
+            if tag == "a" and attrs.get("href"):
+                href = attrs["href"]
+        return frozenset(style), href
+
+    def _start_runs(self):
+        self._runs = []
+
+    # -- HTMLParser overrides ------------------------------------------
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag in ("h1", "h2", "h3"):
+            self._heading_tag = tag
+            self._runs = []
+        elif tag == "p":
+            self._start_runs()
+        elif tag == "ul":
+            self._list_items = []
+        elif tag == "li":
+            self._start_runs()
+        elif tag == "dl":
+            self._dl_items = []
+        elif tag == "dt":
+            self._start_runs()
+        elif tag == "dd":
+            self._start_runs()
+        elif tag == "table":
+            self._table_rows = []
+        elif tag == "tr":
+            self._table_current_row = []
+            self._table_row_is_header = False
+        elif tag in ("td", "th"):
+            self._start_runs()
+            if tag == "th":
+                self._table_row_is_header = True
+        elif tag == "div" and "note" in (attrs.get("class") or ""):
+            self._in_note = True
+            self._start_runs()
+        elif tag == "br" and self._runs is not None:
+            self._runs.append(("\n", frozenset(), None))
+        self._tag_stack.append((tag, attrs))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self._tag_stack) - 1, -1, -1):
+            if self._tag_stack[i][0] == tag:
+                del self._tag_stack[i:]
+                break
+
+        if tag in ("h1", "h2", "h3") and self._heading_tag:
+            text = "".join(t for t, _s, _h in (self._runs or [])).strip()
+            if text:
+                self.blocks.append({"type": self._heading_tag, "text": text})
+            self._heading_tag = None
+            self._runs = None
+        elif tag == "p" and self._runs is not None and not self._in_note:
+            if any(t.strip() for t, _s, _h in self._runs):
+                self.blocks.append({"type": "p", "runs": self._runs})
+            self._runs = None
+        elif tag == "li" and self._runs is not None:
+            if self._list_items is not None:
+                self._list_items.append(self._runs)
+            self._runs = None
+        elif tag == "ul" and self._list_items is not None:
+            self.blocks.append({"type": "ul", "items": self._list_items})
+            self._list_items = None
+        elif tag == "dt" and self._runs is not None:
+            self._dl_current = [self._runs, []]
+            self._runs = None
+        elif tag == "dd" and self._runs is not None:
+            if self._dl_current is not None:
+                self._dl_current[1] = self._runs
+                if self._dl_items is not None:
+                    self._dl_items.append(self._dl_current)
+                self._dl_current = None
+            self._runs = None
+        elif tag == "dl" and self._dl_items is not None:
+            self.blocks.append({"type": "dl", "items": self._dl_items})
+            self._dl_items = None
+        elif tag in ("td", "th") and self._runs is not None:
+            if self._table_current_row is not None:
+                self._table_current_row.append(self._runs)
+            self._runs = None
+        elif tag == "tr" and self._table_current_row is not None:
+            if self._table_rows is not None:
+                self._table_rows.append((self._table_row_is_header, self._table_current_row))
+            self._table_current_row = None
+        elif tag == "table" and self._table_rows is not None:
+            self.blocks.append({"type": "table", "rows": self._table_rows})
+            self._table_rows = None
+        elif tag == "div" and self._in_note:
+            if self._runs is not None and any(t.strip() for t, _s, _h in self._runs):
+                self.blocks.append({"type": "note", "runs": self._runs})
+            self._runs = None
+            self._in_note = False
+
+    def handle_data(self, data):
+        if self._runs is None:
+            return
+        collapsed = WHITESPACE_RE.sub(" ", data)
+        if collapsed == "":
+            return
+        style, href = self._current_style_and_href()
+        self._runs.append((collapsed, style, href))
+
+    @classmethod
+    def parse(cls, source: str) -> list:
+        parser = cls()
+        try:
+            parser.feed(source)
+            parser.close()
+        except Exception:
+            pass
+        return parser.blocks
 
 
 def is_interactive_program(path: Path) -> bool:
@@ -1846,15 +2009,212 @@ class LauncherApp:
 
         popup.after(650, finish)
 
+    # ------------------------------------------------ native guide render --
+    def _guide_open_link(self, href: str, base_dir: Path):
+        """Shared link-click handler for natively-rendered guide content.
+        Mirrors what tkinterweb's on_link_click used to do: local .skill
+        files get the native Save-As + download animation treatment (see
+        _download_skill_file), mailto/http(s) links open normally, and
+        any other relative link is resolved against the guide's own
+        folder and opened externally if it exists."""
+        if not href:
+            return
+        if href.startswith("mailto:") or href.startswith("http://") or href.startswith("https://"):
+            webbrowser.open(href)
+            return
+        skill_path = self._resolve_local_download_path(href, base_dir)
+        if skill_path is not None:
+            self._download_skill_file(skill_path)
+            return
+        try:
+            parsed = urllib.parse.urlparse(href)
+            raw_path = urllib.parse.unquote(parsed.path or href)
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = (base_dir / candidate).resolve()
+            if candidate.exists():
+                webbrowser.open(candidate.as_uri())
+        except Exception:
+            pass
+
+    def _build_rich_text(self, parent, runs, base_dir: Path, font_size=12, base_color=None, bg_color=None):
+        """Renders a list of (text, styleset, href) runs as one flowing,
+        read-only paragraph able to mix bold/link/placeholder styling
+        inline -- e.g. "...guessing. Download Skill" or "Brad Boyles —
+        Brad@thecentercc.com" -- which a plain CTkLabel can't do, since a
+        label only ever draws one font/color for its whole text. Backed
+        by a bare tkinter.Text widget (CTk has no rich-text widget of its
+        own), styled to sit invisibly among the CTk widgets around it and
+        auto-sized to its wrapped line count so it behaves like a normal
+        paragraph rather than a fixed-size box."""
+        bg_color = bg_color or BODY_BG
+        base_color = base_color or TEXT_MUTED
+
+        widget = tk.Text(
+            parent, wrap="word", background=bg_color, foreground=base_color,
+            borderwidth=0, highlightthickness=0, font=F(font_size), padx=0, pady=0,
+            cursor="arrow", takefocus=0, height=1,
+        )
+        widget.tag_configure("bold", font=F(font_size, "bold"), foreground=TEXT_DARK)
+        widget.tag_configure("fill", foreground="#b45309")
+        widget.tag_configure("link", foreground=ACCENT, underline=True)
+
+        has_link = False
+        for text, styleset, href in runs:
+            tags = [s for s in ("bold", "fill") if s in styleset]
+            if href:
+                tags.append("link")
+                tags.append(f"href::{href}")
+                has_link = True
+            widget.insert("end", text, tuple(tags))
+
+        if has_link:
+            def on_click(event):
+                index = widget.index(f"@{event.x},{event.y}")
+                for name in widget.tag_names(index):
+                    if name.startswith("href::"):
+                        self._guide_open_link(name[len("href::"):], base_dir)
+                        return
+
+            hand_cursor = "pointinghand" if sys.platform == "darwin" else "hand2"
+            widget.tag_bind("link", "<Button-1>", on_click)
+            widget.tag_bind("link", "<Enter>", lambda e: widget.configure(cursor=hand_cursor))
+            widget.tag_bind("link", "<Leave>", lambda e: widget.configure(cursor="arrow"))
+
+        widget.configure(state="disabled")
+        widget.pack(fill="x", anchor="w")
+
+        def resize(event=None):
+            try:
+                counted = widget.count("1.0", "end", "displaylines")
+                lines = counted[0] if counted else 1
+                widget.configure(height=max(1, lines))
+            except Exception:
+                pass
+
+        widget.bind("<Configure>", resize)
+        widget.after(30, resize)
+        return widget
+
+    def _render_guide_table(self, parent, rows):
+        if not rows:
+            return
+        col_count = max((len(cells) for _is_header, cells in rows), default=0)
+        if col_count == 0:
+            return
+
+        table_card = ctk.CTkFrame(parent, fg_color=CARD_BG, corner_radius=10, border_width=1, border_color=BORDER)
+        table_card.pack(fill="x", pady=(8, 12))
+        for col in range(col_count):
+            table_card.grid_columnconfigure(col, weight=1, uniform="guide_table_col")
+
+        for row_idx, (is_header, cells) in enumerate(rows):
+            row_bg = ACCENT_SOFT if is_header else CARD_BG
+            for col_idx in range(col_count):
+                cell_runs = cells[col_idx] if col_idx < len(cells) else []
+                cell_text = "".join(t for t, _s, _h in cell_runs).strip()
+                is_fill = any("fill" in s for _t, s, _h in cell_runs)
+                cell_color = "#b45309" if is_fill else (TEXT_DARK if is_header else TEXT_MUTED)
+                ctk.CTkLabel(
+                    table_card,
+                    text=cell_text or "—",
+                    font=F(12, "bold" if is_header else None),
+                    text_color=cell_color,
+                    fg_color=row_bg,
+                    anchor="w",
+                    justify="left",
+                    wraplength=200,
+                ).grid(row=row_idx, column=col_idx, sticky="nsew", padx=12, pady=8)
+
+    def _render_guide_blocks(self, parent, blocks: list, base_dir: Path):
+        """Draws parsed guide blocks (see _GuideHTMLParser) using the same
+        native CTk widgets and theme-variable colors Home/Apps use, so
+        guide pages get identical rendering quality and, as a bonus,
+        finally follow the Light/Dark/Eye Comfort theme instead of a
+        guide's own hardcoded CSS colors."""
+        for block in blocks:
+            kind = block["type"]
+            if kind == "h1":
+                ctk.CTkLabel(
+                    parent, text=block["text"], font=F(19, "bold"), text_color=TEXT_DARK,
+                    fg_color=BODY_BG, wraplength=640, justify="left",
+                ).pack(anchor="w", pady=(0, 16))
+            elif kind == "h2":
+                wrap = ctk.CTkFrame(parent, fg_color=BODY_BG)
+                wrap.pack(fill="x", anchor="w", pady=(24, 8))
+                ctk.CTkLabel(
+                    wrap, text=block["text"], font=F(14, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG,
+                ).pack(anchor="w")
+                ctk.CTkFrame(wrap, fg_color=BORDER, height=1, corner_radius=0).pack(fill="x", pady=(6, 0))
+            elif kind == "h3":
+                ctk.CTkLabel(
+                    parent, text=block["text"], font=F(12, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG,
+                    wraplength=640, justify="left",
+                ).pack(anchor="w", pady=(14, 4))
+            elif kind == "p":
+                self._build_rich_text(parent, block["runs"], base_dir, font_size=12, base_color=TEXT_MUTED, bg_color=BODY_BG)
+            elif kind == "ul":
+                for item_runs in block["items"]:
+                    row = ctk.CTkFrame(parent, fg_color=BODY_BG)
+                    row.pack(fill="x", anchor="w")
+                    ctk.CTkLabel(
+                        row, text="•", font=F(12), text_color=TEXT_MUTED, fg_color=BODY_BG, width=16,
+                    ).pack(side="left", anchor="n")
+                    bullet_body = ctk.CTkFrame(row, fg_color=BODY_BG)
+                    bullet_body.pack(side="left", fill="x", expand=True)
+                    self._build_rich_text(bullet_body, item_runs, base_dir, font_size=12, base_color=TEXT_MUTED, bg_color=BODY_BG)
+            elif kind == "dl":
+                for term_runs, desc_runs in block["items"]:
+                    term_text = "".join(t for t, _s, _h in term_runs).strip()
+                    ctk.CTkLabel(
+                        parent, text=term_text, font=F(12, "bold"), text_color=TEXT_DARK, fg_color=BODY_BG,
+                        wraplength=640, justify="left",
+                    ).pack(anchor="w", pady=(14, 2))
+                    desc_wrap = ctk.CTkFrame(parent, fg_color=BODY_BG)
+                    desc_wrap.pack(fill="x", anchor="w")
+                    self._build_rich_text(desc_wrap, desc_runs, base_dir, font_size=12, base_color=TEXT_MUTED, bg_color=BODY_BG)
+            elif kind == "table":
+                self._render_guide_table(parent, block["rows"])
+            elif kind == "note":
+                note_card = ctk.CTkFrame(parent, fg_color=ACCENT_SOFT, corner_radius=10)
+                note_card.pack(fill="x", pady=(16, 4))
+                note_inner = ctk.CTkFrame(note_card, fg_color=ACCENT_SOFT)
+                note_inner.pack(fill="x", padx=14, pady=12)
+                self._build_rich_text(note_inner, block["runs"], base_dir, font_size=11, base_color=TEXT_DARK, bg_color=ACCENT_SOFT)
+
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
         self._content_header(title, extra_button=("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri())))
 
-        # No border here (unlike some other cards) so guide pages match the
-        # borderless look of Home/Apps -- this used to have
-        # border_width=1, border_color=BORDER, which is the outline that
-        # only ever showed up on guide pages (FAQ, Guides, Contacts),
-        # never Home/Apps, since those don't use this card at all.
+        # Guides render natively (same CTk widgets/theme colors as
+        # Home/Apps) instead of through tkinterweb, which isn't
+        # Retina-aware the way CustomTkinter's own widgets are -- that
+        # mismatch is what made guide pages look visibly softer than
+        # Home/Apps. Falls back to the old tkinterweb viewer (or a plain
+        # message) only if native parsing/rendering hits something it
+        # can't handle, so an unexpected guide still displays somehow.
+        scroll = None
+        try:
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            blocks = _GuideHTMLParser.parse(source)
+            if not blocks:
+                raise ValueError("no renderable content found")
+            scroll = ctk.CTkScrollableFrame(
+                self.content_frame, fg_color=BODY_BG, corner_radius=0,
+                scrollbar_fg_color=BODY_BG, scrollbar_button_color=BORDER,
+                scrollbar_button_hover_color=TEXT_MUTED,
+            )
+            scroll.pack(fill="both", expand=True, padx=32, pady=(0, 20))
+            self._render_guide_blocks(scroll, blocks, path.parent)
+            return
+        except Exception:
+            write_error_log(f"(guide native-render fallback for {path})\n{traceback.format_exc()}")
+            if scroll is not None:
+                try:
+                    scroll.destroy()
+                except Exception:
+                    pass
+
         viewer_card = ctk.CTkFrame(self.content_frame, fg_color=CARD_BG, corner_radius=14)
         viewer_card.pack(fill="both", expand=True, padx=24, pady=(0, 20))
 
