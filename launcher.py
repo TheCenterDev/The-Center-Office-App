@@ -1716,31 +1716,52 @@ class LauncherApp:
             )
 
     def _highlight_nav(self, active_path):
-        if self.home_button is not None:
-            if active_path is None:
-                self.home_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
-            else:
-                self.home_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
-        if self.apps_button is not None:
-            if active_path == "apps":
-                self.apps_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
-            else:
-                self.apps_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
-        if self.skills_button is not None:
-            if active_path == "skills":
-                self.skills_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
-            else:
-                self.skills_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
-        if self.settings_button is not None:
-            if active_path == "settings":
-                self.settings_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
-            else:
-                self.settings_button.configure(fg_color="transparent", text_color=SIDEBAR_TEXT_MUTED)
-        for path, btn in self._nav_buttons.items():
-            if path == active_path:
-                btn.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
-            else:
-                btn.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
+        # Every .configure() below goes through this instead of being
+        # called directly, because these are all long-lived references
+        # (self.home_button, self._nav_buttons, ...) held across a full
+        # Sign Out -> Sign In cycle. _sign_out() now clears them up
+        # front, but this is a second, unconditional safety net: if any
+        # reference here ever does end up pointing at an already-
+        # destroyed widget again (from this or some future change), a
+        # bare .configure() call throws _tkinter.TclError: invalid
+        # command name "...!ctkbutton" and takes the whole callback down
+        # with it -- which is exactly the crash reported after Sign Out
+        # -> Sign In (error_log.txt, _highlight_nav, TclError on a
+        # button living inside the sidebar's scrollable nav list).
+        def safe_configure(widget, **kwargs):
+            if widget is None:
+                return
+            try:
+                widget.configure(**kwargs)
+            except Exception:
+                pass
+
+        safe_configure(
+            self.home_button,
+            fg_color=(SIDEBAR_ACTIVE if active_path is None else SIDEBAR_BG),
+            text_color=(ACCENT if active_path is None else SIDEBAR_TEXT),
+        )
+        safe_configure(
+            self.apps_button,
+            fg_color=(SIDEBAR_ACTIVE if active_path == "apps" else SIDEBAR_BG),
+            text_color=(ACCENT if active_path == "apps" else SIDEBAR_TEXT),
+        )
+        safe_configure(
+            self.skills_button,
+            fg_color=(SIDEBAR_ACTIVE if active_path == "skills" else SIDEBAR_BG),
+            text_color=(ACCENT if active_path == "skills" else SIDEBAR_TEXT),
+        )
+        safe_configure(
+            self.settings_button,
+            fg_color=(SIDEBAR_ACTIVE if active_path == "settings" else "transparent"),
+            text_color=(ACCENT if active_path == "settings" else SIDEBAR_TEXT_MUTED),
+        )
+        for path, btn in list(self._nav_buttons.items()):
+            safe_configure(
+                btn,
+                fg_color=(SIDEBAR_ACTIVE if path == active_path else SIDEBAR_BG),
+                text_color=(ACCENT if path == active_path else SIDEBAR_TEXT),
+            )
 
     def _select_document(self, path: Path, title: str, is_program: bool):
         if not path.exists():
@@ -2725,6 +2746,22 @@ class LauncherApp:
         self.user_role = None
         self._selected_path = None
         self._last_search_query = ""
+        # These are all long-lived references to this session's sidebar
+        # widgets (self.home_button etc., and every entry in
+        # self._nav_buttons). Destroying the widgets below doesn't clear
+        # the Python attributes still pointing at them -- without this,
+        # _highlight_nav() ran on the next Sign In using these stale
+        # references before the freshly-rebuilt sidebar's real buttons
+        # were assigned, and .configure() on an already-destroyed widget
+        # raises _tkinter.TclError: invalid command name "...!ctkbutton"
+        # (see error_log.txt). _highlight_nav() now also guards against
+        # this defensively, but clearing the references here is the
+        # actual fix -- there's nothing stale left to hit.
+        self.home_button = None
+        self.apps_button = None
+        self.skills_button = None
+        self.settings_button = None
+        self._nav_buttons = {}
         for widget in self.root.winfo_children():
             widget.destroy()
         self._reset_stale_scroll_bindings(rearm_nav=False)
