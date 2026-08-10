@@ -537,8 +537,15 @@ LOGIN_TEXT = "#1D2071"
 LOGIN_BORDER = "#dde1ee"
 LOGIN_ACCENT_SOFT = "#e3f8ff"
 
-# No real email/accounts system yet — these two hardcoded logins are a
-# placeholder gate until The Center wants real per-person accounts.
+# No real email/accounts system yet — these three hardcoded logins are
+# a placeholder gate until The Center wants real per-person accounts.
+# Owner outranks Admin: everything Admin can do, plus changing the
+# Admin password and their own Owner password (see _show_settings).
+# Only the Admin and Staff passwords are meant to ever be changed from
+# inside the app (see DEFAULT_SETTINGS/"staff_password" etc. below) —
+# these constants are just the hardcoded fallback for a fresh install.
+OWNER_USERNAME = "owner"
+OWNER_PASSWORD = "Th3CeNt3r2005!"
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "TH3Center1"
 STAFF_USERNAME = "staff"
@@ -617,13 +624,15 @@ DEFAULT_SETTINGS = {
     "sidebar_expanded": True,
     "remember_username": True,  # prefill the last-used login username
     "last_username": "",
-    # Overrides STAFF_PASSWORD once an admin changes it from Settings.
-    # Defaults to the hardcoded constant so a fresh install (with no
-    # settings.json yet) behaves exactly as before. The admin password
-    # itself is intentionally NOT here — it stays fixed in source, since
-    # it's the one credential that shouldn't be changeable from inside
-    # the app itself.
+    # Overrides for STAFF_PASSWORD/ADMIN_PASSWORD/OWNER_PASSWORD once
+    # someone changes them from Settings. Each defaults to its hardcoded
+    # constant so a fresh install (with no settings.json yet) behaves
+    # exactly as before. Staff's password can be changed by Admin or
+    # Owner; Admin's and Owner's own passwords can only be changed by
+    # Owner (see the role checks in _show_settings).
     "staff_password": STAFF_PASSWORD,
+    "admin_password": ADMIN_PASSWORD,
+    "owner_password": OWNER_PASSWORD,
 }
 
 
@@ -937,7 +946,7 @@ class LauncherApp:
         self.apps_button = None
         self.skills_button = None
         self.settings_button = None
-        self.user_role = None  # "admin" or "staff" once logged in
+        self.user_role = None  # "owner", "admin", or "staff" once logged in
 
         self.settings = load_settings()
         self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
@@ -1042,7 +1051,9 @@ class LauncherApp:
         def attempt_login(*_event):
             username = username_var.get().strip().lower()
             password = password_var.get()
-            if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            if username == OWNER_USERNAME and password == self.settings.get("owner_password", OWNER_PASSWORD):
+                role = "owner"
+            elif username == ADMIN_USERNAME and password == self.settings.get("admin_password", ADMIN_PASSWORD):
                 role = "admin"
             elif username == STAFF_USERNAME and password == self.settings.get("staff_password", STAFF_PASSWORD):
                 role = "staff"
@@ -1913,7 +1924,13 @@ class LauncherApp:
     def _show_home(self):
         """The initial page and the sidebar's pinned 'Home' entry — an
         overview of what this app is for, aimed at someone brand new to
-        the office."""
+        the office. The welcome heading, intro, and the two info
+        sections below are rendered from html/01_welcome.html (the same
+        native guide-block renderer Guides use), instead of being
+        hardcoded here, so Admin/Owner can edit that wording with the
+        same "Edit This Page" mechanism as any other guide (see
+        _edit_page_file). The logo and the Employee Portal callout stay
+        as fixed, Python-built chrome around it."""
         self._selected_path = None
         self._clear_content()
         self._highlight_nav(None)
@@ -1935,34 +1952,61 @@ class LauncherApp:
         logo_inner.pack(padx=14, pady=14)
         self._render_logo(logo_inner, self._welcome_logo, 64)
 
-        ctk.CTkLabel(
-            scroll,
-            text="Welcome to the Office App",
-            font=F(19, "bold"),
-            text_color=TEXT_DARK,
-            fg_color=BODY_BG,
-            wraplength=560,
-            justify="left",
-        ).pack(anchor="w", pady=(0, 6))
+        home_page_path = HTML_DIR / "01_welcome.html"
+        if self.user_role in ("admin", "owner"):
+            edit_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
+            edit_row.pack(fill="x", pady=(0, 4))
+            ctk.CTkButton(
+                edit_row,
+                text="Edit This Page ✎",
+                font=F(11),
+                fg_color="transparent",
+                hover_color=TEXT_DARK,
+                text_color=ACCENT,
+                border_width=0,
+                corner_radius=8,
+                height=28,
+                command=lambda: self._edit_page_file(home_page_path),
+            ).pack(anchor="e")
 
-        ctk.CTkLabel(
-            scroll,
-            text="This is your toolbox for office work — guides, small tools, "
-                 "and Claude Skills, all in one place. Just click around in "
-                 "the sidebar to see what's here.",
-            font=F(13),
-            text_color=TEXT_MUTED,
-            fg_color=BODY_BG,
-            wraplength=560,
-            justify="left",
-        ).pack(anchor="w", pady=(0, 18))
+        try:
+            source = home_page_path.read_text(encoding="utf-8", errors="ignore")
+            blocks = _GuideHTMLParser.parse(source)
+            if not blocks:
+                raise ValueError("no renderable content found")
+            self._render_guide_blocks(scroll, blocks, HTML_DIR)
+        except Exception:
+            # Same defensive fallback pattern as _show_guide -- Home
+            # should never show fully blank just because the underlying
+            # file went missing or got mangled by a manual edit.
+            write_error_log(f"(home native-render fallback for {home_page_path})\n{traceback.format_exc()}")
+            ctk.CTkLabel(
+                scroll,
+                text="Welcome to the Office App",
+                font=F(19, "bold"),
+                text_color=TEXT_DARK,
+                fg_color=BODY_BG,
+                wraplength=560,
+                justify="left",
+            ).pack(anchor="w", pady=(0, 6))
+            ctk.CTkLabel(
+                scroll,
+                text="This is your toolbox for office work — guides, small tools, "
+                     "and Claude Skills, all in one place.",
+                font=F(13),
+                text_color=TEXT_MUTED,
+                fg_color=BODY_BG,
+                wraplength=560,
+                justify="left",
+            ).pack(anchor="w", pady=(0, 18))
 
         # Callout linking out to the full employee onboarding site — this
         # app deliberately only covers tools/Skills, so anything else new
         # hires need (policies, other links, general instructions) points
-        # here instead of trying to duplicate it in-app.
+        # here instead of trying to duplicate it in-app. Fixed chrome,
+        # not part of the editable file above.
         portal_card = ctk.CTkFrame(scroll, fg_color=ACCENT_SOFT, corner_radius=12)
-        portal_card.pack(fill="x", pady=(0, 18))
+        portal_card.pack(fill="x", pady=(18, 0))
         portal_inner = ctk.CTkFrame(portal_card, fg_color=ACCENT_SOFT)
         portal_inner.pack(fill="x", padx=18, pady=16)
         ctk.CTkLabel(
@@ -1995,39 +2039,6 @@ class LauncherApp:
             height=34,
             command=lambda: webbrowser.open("https://thecenterwcy.com/employee-portal/"),
         ).pack(anchor="w")
-
-        def section(heading: str, body: str):
-            ctk.CTkLabel(
-                scroll,
-                text=heading,
-                font=F(13, "bold"),
-                text_color=TEXT_DARK,
-                fg_color=BODY_BG,
-            ).pack(anchor="w", pady=(14, 4))
-            ctk.CTkLabel(
-                scroll,
-                text=body,
-                font=F(12),
-                text_color=TEXT_MUTED,
-                fg_color=BODY_BG,
-                wraplength=560,
-                justify="left",
-            ).pack(anchor="w")
-
-        section(
-            "Using Claude Skills",
-            "For some tasks, just tell Claude what you need in plain "
-            "English — like \"reconcile this deposit\" or \"draft the "
-            "financials email\" — and it handles it for you. No need to "
-            "come find a button for it.",
-        )
-        section(
-            "A couple of quick tips",
-            "Anything marked ↗ opens in its own window since it needs a "
-            "real browser. Use Search to find something by name, or even "
-            "by a word inside it. And Settings (bottom of the sidebar) is "
-            "where you can switch to dark mode or make the text bigger.",
-        )
 
     def _show_apps(self):
         """The sidebar's pinned 'Apps' entry — a dedicated list of every
@@ -2326,20 +2337,20 @@ class LauncherApp:
             lambda v: apply_and_rebuild("remember_username", v),
         )
 
-        if self.user_role == "admin":
-            section(
-                "Staff Login Password",
-                "Admin only. Sets the password staff use to sign in — their "
-                "username stays \"staff\". \"Reset to Defaults\" below also "
-                "resets this back to the original password.",
-            )
+        def password_change_section(heading, subtext, settings_key, placeholder_label, button_text):
+            """One reusable 'change a login password' block: new + confirm
+            fields, a save button, and an inline status message. Used for
+            Staff (admin/owner), Admin (owner only), and Owner's own
+            password (owner only) below — same shape each time, just a
+            different settings.json key and who's allowed to see it."""
+            section(heading, subtext)
 
-            staff_pw_new_var = StringVar()
-            staff_pw_confirm_var = StringVar()
-            staff_pw_status_var = StringVar()
-            staff_pw_status_color = {"color": TEXT_MUTED}
+            new_var = StringVar()
+            confirm_var = StringVar()
+            status_var = StringVar()
+            status_color = {"color": TEXT_MUTED}
 
-            def staff_pw_field(var, placeholder):
+            def field(var, placeholder):
                 return ctk.CTkEntry(
                     scroll,
                     textvariable=var,
@@ -2354,43 +2365,73 @@ class LauncherApp:
                     text_color=TEXT_DARK,
                 )
 
-            staff_pw_field(staff_pw_new_var, "New staff password").pack(anchor="w", pady=(6, 6))
-            staff_pw_field(staff_pw_confirm_var, "Confirm new password").pack(anchor="w")
+            field(new_var, f"New {placeholder_label}").pack(anchor="w", pady=(6, 6))
+            field(confirm_var, "Confirm new password").pack(anchor="w")
 
-            staff_pw_status_label = ctk.CTkLabel(
-                scroll, textvariable=staff_pw_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=BODY_BG
+            status_label = ctk.CTkLabel(
+                scroll, textvariable=status_var, font=F(11), text_color=TEXT_MUTED, fg_color=BODY_BG
             )
 
-            def update_staff_password():
-                new = staff_pw_new_var.get()
-                confirm = staff_pw_confirm_var.get()
+            def update_password():
+                new = new_var.get()
+                confirm = confirm_var.get()
                 if not new:
-                    staff_pw_status_color["color"] = "#c0392b"
-                    staff_pw_status_var.set("Enter a new password.")
+                    status_color["color"] = "#c0392b"
+                    status_var.set("Enter a new password.")
                 elif new != confirm:
-                    staff_pw_status_color["color"] = "#c0392b"
-                    staff_pw_status_var.set("New password and confirmation don't match.")
+                    status_color["color"] = "#c0392b"
+                    status_var.set("New password and confirmation don't match.")
                 else:
-                    self.settings["staff_password"] = new
+                    self.settings[settings_key] = new
                     save_settings(self.settings)
-                    staff_pw_new_var.set("")
-                    staff_pw_confirm_var.set("")
-                    staff_pw_status_color["color"] = "#1f8a4c"
-                    staff_pw_status_var.set("Staff password updated.")
-                staff_pw_status_label.configure(text_color=staff_pw_status_color["color"])
+                    new_var.set("")
+                    confirm_var.set("")
+                    status_color["color"] = "#1f8a4c"
+                    status_var.set("Password updated.")
+                status_label.configure(text_color=status_color["color"])
 
             ctk.CTkButton(
                 scroll,
-                text="Update Staff Password",
+                text=button_text,
                 font=F(12, "bold"),
                 fg_color=ACCENT,
                 hover_color=TEXT_DARK,
                 text_color="white",
                 corner_radius=8,
                 height=34,
-                command=update_staff_password,
+                command=update_password,
             ).pack(anchor="w", pady=(10, 4))
-            staff_pw_status_label.pack(anchor="w")
+            status_label.pack(anchor="w")
+
+        if self.user_role in ("admin", "owner"):
+            password_change_section(
+                "Staff Login Password",
+                "Admin/Owner only. Sets the password staff use to sign in — "
+                "their username stays \"staff\". \"Reset to Defaults\" below "
+                "also resets this back to the original password.",
+                "staff_password",
+                "staff password",
+                "Update Staff Password",
+            )
+
+        if self.user_role == "owner":
+            password_change_section(
+                "Admin Login Password",
+                "Owner only. Sets the password admin uses to sign in — "
+                "their username stays \"admin\". \"Reset to Defaults\" below "
+                "also resets this back to the original password.",
+                "admin_password",
+                "admin password",
+                "Update Admin Password",
+            )
+            password_change_section(
+                "Owner Login Password",
+                "Your own password. \"Reset to Defaults\" below also resets "
+                "this back to the original password.",
+                "owner_password",
+                "owner password",
+                "Update Owner Password",
+            )
 
         reset_row = ctk.CTkFrame(scroll, fg_color=BODY_BG)
         reset_row.pack(anchor="w", pady=(30, 0))
@@ -2435,10 +2476,28 @@ class LauncherApp:
         """Restores every display preference to its default — except the
         remembered username, which isn't really a "display" preference
         and shouldn't quietly disappear just because someone reset the
-        theme back to Light."""
+        theme back to Light.
+
+        Login passwords are handled the same way: "Reset to Defaults" is
+        for display preferences, and this button is visible to everyone
+        (including Staff), so it shouldn't silently undo a password
+        someone deliberately changed just because a different person
+        clicked it. Each credential is only actually reset here by the
+        same role that's allowed to change it in the first place —
+        Admin/Owner can reset the staff password (they can already
+        change it directly in this same page), only Owner can reset the
+        admin or owner password."""
         keep_username = self.settings.get("last_username", "")
+        keep_staff_password = self.settings.get("staff_password", STAFF_PASSWORD)
+        keep_admin_password = self.settings.get("admin_password", ADMIN_PASSWORD)
+        keep_owner_password = self.settings.get("owner_password", OWNER_PASSWORD)
         self.settings = dict(DEFAULT_SETTINGS)
         self.settings["last_username"] = keep_username
+        if self.user_role not in ("admin", "owner"):
+            self.settings["staff_password"] = keep_staff_password
+        if self.user_role != "owner":
+            self.settings["admin_password"] = keep_admin_password
+            self.settings["owner_password"] = keep_owner_password
         save_settings(self.settings)
         apply_theme(self.settings["theme"])
         apply_font_scale(self.settings["font_scale"])
@@ -2724,7 +2783,7 @@ class LauncherApp:
     def _show_guide(self, title: str, path: Path):
         self._clear_content()
         header_buttons = [("Open in Browser ↗", lambda: webbrowser.open(path.resolve().as_uri()))]
-        if self.user_role == "admin":
+        if self.user_role in ("admin", "owner"):
             header_buttons.append(("Edit This Page ✎", lambda: self._edit_page_file(path)))
         self._content_header(title, extra_buttons=header_buttons)
 
