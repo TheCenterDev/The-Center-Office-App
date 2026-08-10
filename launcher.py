@@ -362,6 +362,46 @@ WELCOME_LOGO_HEIGHT = 72  # px tall on the welcome screen (bigger, roomier)
 # time in the general document list.
 SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 
+# The Claude Skills built for this office, shown on the sidebar's pinned
+# "Skills" page (mirrors how "Apps" lists every interactive tool). These
+# aren't files in html/ -- there's nothing to open in the launcher for a
+# Skill -- so they're just a small hand-maintained list here rather than
+# something discover_documents() scans for. Each "file" is packaged
+# under assets/skills/ (see _show_skills / _download_skill_file).
+SKILLS = [
+    {
+        "name": "Deposit Reconciliation",
+        "description": (
+            "Ask Claude to reconcile a bank deposit against the donor deposit-detail export, and it "
+            "checks that the two actually match before doing anything else. Once they line up, it builds "
+            "the polished Deposit Detail PDF the board is used to seeing — Checks/Total Deposit, "
+            "Restricted vs. Unrestricted, and Payment Method breakdowns. If something's off, it stops "
+            "and tells you exactly what doesn't match instead of guessing."
+        ),
+        "prompts": [
+            "Reconcile this deposit against QuickBooks.",
+            "Here's the donor export and the QuickBooks deposit — do they match?",
+            "Put together the deposit detail PDF for this batch.",
+        ],
+        "file": "deposit-reconciliation.skill",
+    },
+    {
+        "name": "Financial Summary Email",
+        "description": (
+            "Ask Claude to draft the monthly or year-to-date budget-vs-actual financial summary email, "
+            "and it fills in every one of the organization's income and expense categories — never "
+            "skipping one, even if a number is missing for it. It'll check with you for a quick "
+            "explanation on anything newly over budget before finishing the draft."
+        ),
+        "prompts": [
+            "Draft this month's financials email.",
+            "Compile the budget vs actual email with these QuickBooks numbers.",
+            "Write the monthly financial summary for the board.",
+        ],
+        "file": "financial-summary-email.skill",
+    },
+]
+
 LOGIN_LOGO_HEIGHT = 80  # px tall on the login screen
 # Logo and card are stacked in one column (logo on top, card below) and
 # that whole stack is centered as a unit, so the two never overlap.
@@ -748,6 +788,7 @@ class LauncherApp:
         self._last_search_query = ""
         self.home_button = None
         self.apps_button = None
+        self.skills_button = None
         self.settings_button = None
         self.user_role = None  # "admin" or "staff" once logged in
 
@@ -989,6 +1030,8 @@ class LauncherApp:
             self._show_home()
         elif selected_path == "apps":
             self._show_apps()
+        elif selected_path == "skills":
+            self._show_skills()
         elif selected_path == "settings":
             self._show_settings()
         elif selected_path == "search":
@@ -1134,6 +1177,22 @@ class LauncherApp:
             command=self._show_apps,
         )
         self.apps_button.pack(fill="x")
+
+        skills_row = ctk.CTkFrame(self.sidebar_content, fg_color=SIDEBAR_BG)
+        skills_row.pack(fill="x", padx=6, pady=(0, 4))
+        self.skills_button = ctk.CTkButton(
+            skills_row,
+            text="Skills",
+            anchor="w",
+            font=F(12, "bold"),
+            fg_color=SIDEBAR_BG,
+            hover_color=SIDEBAR_BUTTON_HOVER,
+            text_color=SIDEBAR_TEXT,
+            corner_radius=8,
+            height=36,
+            command=self._show_skills,
+        )
+        self.skills_button.pack(fill="x")
 
         self.nav_scroll = ctk.CTkScrollableFrame(
             self.sidebar_content, fg_color=SIDEBAR_BG, corner_radius=0,
@@ -1434,6 +1493,11 @@ class LauncherApp:
                 self.apps_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
             else:
                 self.apps_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
+        if self.skills_button is not None:
+            if active_path == "skills":
+                self.skills_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
+            else:
+                self.skills_button.configure(fg_color=SIDEBAR_BG, text_color=SIDEBAR_TEXT)
         if self.settings_button is not None:
             if active_path == "settings":
                 self.settings_button.configure(fg_color=SIDEBAR_ACTIVE, text_color=ACCENT)
@@ -1779,6 +1843,111 @@ class LauncherApp:
                 width=120,
                 command=lambda p=path, t=title: self._open_program(p, t),
             ).pack(side="right")
+
+    def _show_skills(self):
+        """The sidebar's pinned 'Skills' entry — a dedicated list of the
+        Claude Skills built for this office, mirroring how Apps lists
+        every interactive tool. There's nothing to open in the launcher
+        for a Skill (you just ask Claude in plain language), so this
+        reads from the small SKILLS registry above instead of
+        self.documents, and offers a download of the packaged .skill
+        file for anyone who wants to add it to their own Claude/Cowork
+        chat."""
+        self._selected_path = "skills"
+        self._clear_content()
+        self._highlight_nav("skills")
+
+        scroll = ctk.CTkScrollableFrame(
+            self.content_frame, fg_color=BODY_BG, corner_radius=0,
+            scrollbar_fg_color=BODY_BG, scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=TEXT_MUTED,
+        )
+        scroll.pack(fill="both", expand=True, padx=32, pady=28)
+
+        ctk.CTkLabel(
+            scroll,
+            text="Skills",
+            font=F(19, "bold"),
+            text_color=TEXT_DARK,
+            fg_color=BODY_BG,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            scroll,
+            text="Things Claude already knows how to do for this office — just ask, no app to open.",
+            font=F(12),
+            text_color=TEXT_MUTED,
+            fg_color=BODY_BG,
+        ).pack(anchor="w", pady=(2, 18))
+
+        if not SKILLS:
+            ctk.CTkLabel(
+                scroll,
+                text="No Skills added yet.",
+                font=F(12),
+                text_color=TEXT_MUTED,
+                fg_color=BODY_BG,
+            ).pack(anchor="w")
+            return
+
+        for skill in SKILLS:
+            card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
+            card.pack(fill="x", pady=8)
+
+            inner = ctk.CTkFrame(card, fg_color=CARD_BG)
+            inner.pack(fill="x", padx=18, pady=16)
+
+            header_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
+            header_row.pack(fill="x")
+            ctk.CTkLabel(
+                header_row,
+                text=skill["name"],
+                font=F(14, "bold"),
+                text_color=TEXT_DARK,
+                fg_color=CARD_BG,
+                anchor="w",
+            ).pack(side="left", fill="x", expand=True)
+
+            skill_path = ASSETS_DIR / "skills" / skill["file"]
+            ctk.CTkButton(
+                header_row,
+                text="Download Skill",
+                font=F(12, "bold"),
+                fg_color=ACCENT,
+                hover_color=TEXT_DARK,
+                text_color="white",
+                corner_radius=10,
+                height=32,
+                command=lambda p=skill_path: self._download_skill_file(p),
+            ).pack(side="right")
+
+            ctk.CTkLabel(
+                inner,
+                text=skill["description"],
+                font=F(12),
+                text_color=TEXT_MUTED,
+                fg_color=CARD_BG,
+                wraplength=560,
+                justify="left",
+            ).pack(anchor="w", pady=(10, 8))
+
+            ctk.CTkLabel(
+                inner,
+                text="Try asking:",
+                font=F(11, "italic"),
+                text_color=TEXT_MUTED,
+                fg_color=CARD_BG,
+            ).pack(anchor="w")
+            for prompt in skill["prompts"]:
+                ctk.CTkLabel(
+                    inner,
+                    text=f"• “{prompt}”",
+                    font=F(11),
+                    text_color=TEXT_MUTED,
+                    fg_color=CARD_BG,
+                    wraplength=540,
+                    justify="left",
+                    anchor="w",
+                ).pack(fill="x", padx=(4, 0))
 
     def _show_settings(self):
         """Personal display preferences, saved to settings.json next to
