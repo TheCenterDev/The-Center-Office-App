@@ -1474,7 +1474,17 @@ class LauncherApp:
         footer_button("Refresh", self.refresh_documents).pack(fill="x", pady=1)
         self.settings_button = footer_button("Settings", self._show_settings)
         self.settings_button.pack(fill="x", pady=1)
-        footer_button("Sign Out", self._sign_out).pack(fill="x", pady=1)
+        # Deferred to the next idle tick -- same fix as apply_and_rebuild
+        # in _show_settings and attempt_login on the login screen.
+        # _sign_out() destroys the entire sidebar + content pane,
+        # including this very button; tearing that down synchronously
+        # from inside the button's own click handler is the classic Tk
+        # hazard where CTkButton still has post-click bookkeeping to do
+        # on itself once this callback returns, and that throws "invalid
+        # command name ...!ctkbutton" once everything around it is
+        # already gone. This is exactly the TCL error logged to
+        # error_log.txt after Sign Out → Sign back in.
+        footer_button("Sign Out", lambda: self.root.after(1, self._sign_out)).pack(fill="x", pady=1)
         footer_button("Quit", self.root.destroy).pack(fill="x", pady=1)
 
     def _render_logo(self, parent, logo_image, placeholder_size, anchor="w"):
