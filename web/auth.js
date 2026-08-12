@@ -92,6 +92,15 @@
     ROLES: ROLES,
     PERSONAL_SETTING_KEYS: PERSONAL_SETTING_KEYS,
 
+    /** Returns whatever the last-known { user, profile } (or null) is,
+     * without waiting for a new change. Useful right after an action
+     * like signIn() that might not itself produce a fresh listener
+     * event -- e.g. signing in again while already signed in as the
+     * same account resolves successfully but doesn't necessarily fire
+     * the profile listener again, which used to leave the login screen
+     * looking stuck with no feedback at all. */
+    getState: function () { return current; },
+
     /** cb(state) fires immediately with the current state, then again
      * every time auth or the signed-in user's own profile changes.
      * state is null when signed out, otherwise { user, profile }

@@ -133,6 +133,15 @@
     els.loginSubmit.disabled = true;
     els.loginSubmit.textContent = "Signing in…";
     window.CenterAuth.signIn(els.loginEmail.value, els.loginPassword.value)
+      .then(function () {
+        // Force an immediate re-check of the current state rather than
+        // waiting on the profile listener to fire again -- signing in
+        // again while already signed in as the same account resolves
+        // right away without necessarily producing a fresh listener
+        // event, which used to leave the screen looking stuck with no
+        // visible feedback at all.
+        handleAuthState(window.CenterAuth.getState());
+      })
       .catch(function (err) {
         els.loginError.textContent = friendlyAuthError(err);
       })
