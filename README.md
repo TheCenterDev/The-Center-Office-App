@@ -125,11 +125,50 @@ real app, no App Store or Play Store needed.
   Chrome on Android: menu → Add to Home screen / Install app).
 - Editing documents works exactly the same as above — the mobile site
   reads the same `html/` files, so there's nothing extra to maintain.
-- Heads up: this makes the guide/contact content (names, emails, notes
-  in `html/`) reachable by anyone with the link, since it isn't gated by
-  a login yet — the same way the compiled desktop app is already
-  publicly downloadable from Releases. A login/role-gated version is a
-  bigger follow-up project, not part of this phase.
+- The site requires signing in — see "Mobile login and accounts" below.
+
+## Mobile login and accounts
+
+The mobile site is backed by a free Firebase project (Authentication +
+Firestore) for login and per-person settings sync — see `web/auth.js`
+and `firestore.rules`. It's a separate system from the desktop app's
+`users.json`; the two don't share a live connection, so someone needs
+an account in both places to use both apps.
+
+**One-time backend setup** (already done for this project, listed here
+in case it's ever needed again — e.g. a new Firebase project):
+
+1. Create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com),
+   enable **Authentication → Email/Password**, and create a **Firestore
+   Database**.
+2. Register a **Web app** under Project settings → Your apps, and paste
+   its `firebaseConfig` values into `web/firebase-config.js`.
+3. Paste the contents of `firestore.rules` (repo root) into **Firestore
+   Database → Rules** in the console and publish it.
+4. **Bootstrap the first account**: the security rules only let an
+   existing Admin/Director create other people's profiles, so the very
+   first one has to be added by hand once. In the console, go to
+   **Firestore Database → Data → Start collection** → collection ID
+   `users` → document ID: your email, all lowercase (e.g.
+   `dev@thecentercc.com`) → add fields `name` (string), `role` (string,
+   set to `director`), and `preferences` (map, can be left empty `{}`).
+   Also add that same email under **Authentication → Add user** with a
+   password. After that, everyone else can be added through the app's
+   Team page instead of the console.
+
+**Adding a new staff member** (the normal, ongoing way — no console
+work beyond step 1):
+
+1. Firebase console → **Authentication → Add user** → enter their email
+   and a temporary password. This is what lets them sign in at all.
+2. In the mobile site, **Settings → Team** (Admin/Director only) → enter
+   their email, name, and role, → **Save**. This is what tells the app
+   who they are and what they're allowed to see.
+3. Tell them their temporary password, and point them at **Forgot
+   password?** on the sign-in screen if they'd rather set their own.
+
+There's no self-service sign-up anywhere in the app on purpose — both
+steps above are deliberately manual and Admin/Director-only.
 
 ## Adding or replacing the logo
 

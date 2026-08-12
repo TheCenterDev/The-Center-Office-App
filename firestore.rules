@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// Security rules for the mobile site's Firestore database (see
+// web/auth.js). This file is NOT deployed automatically -- there's no
+// Firebase CLI step in this repo's build. Paste this into the Firebase
+// console once: Build -> Firestore Database -> Rules tab -> replace
+// the contents -> Publish. Update it here too if you ever change it in
+// the console, so this file stays the source of truth.
+//
+// Model: one document per person in the "users" collection, keyed by
+// their lowercased email (matching the desktop app's users.json). A
+// signed-in person can always read their own document and update only
+// its "preferences" field (theme/font size/etc, synced across
+// devices). Only Admin/Director accounts can read the whole roster,
+// or create/edit/delete anyone's name and role -- there is no
+// self-service sign-up anywhere in the app.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function emailKey() {
+      return request.auth.token.email.lower();
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(emailKey())).data;
+    }
+
+    function hasProfile() {
+      return exists(/databases/$(database)/documents/users/$(emailKey()));
+    }
+
+    function isAdminOrDirector() {
+      return isSignedIn() && hasProfile() && myProfile().role in ['admin', 'director'];
+    }
+
+    match /users/{email} {
+      allow get: if isSignedIn() && (emailKey() == email || isAdminOrDirector());
+      allow list: if isAdminOrDirector();
+
+      allow create, delete: if isAdminOrDirector();
+
+      // Admin/Director can change anything on any profile. A regular
+      // person can only touch their own "preferences" map -- not their
+      // own name or role, so nobody can promote themselves.
+      allow update: if isAdminOrDirector() || (
+        isSignedIn() && emailKey() == email &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['preferences']) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.name == resource.data.name
+      );
+    }
+  }
+}

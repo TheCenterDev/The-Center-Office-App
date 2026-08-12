@@ -3,6 +3,12 @@
    SIDEBAR_BG/TEXT_DARK = #1D2071, ACCENT (cyan) = #00C0F3,
    ACCENT_SOFT = #e3f8ff, TEXT_MUTED = #6b7280, BODY_BG/CARD_BG = #ffffff */
 
+/* Sidebar stays navy in every theme, same as the desktop app -- it's
+   already a "dark panel" by brand design. Only the content-area colors
+   below (body/card/border/text) change with [data-theme], set by
+   app.js from the signed-in user's synced preference. Values copied
+   directly from launcher.py's THEMES so light/dark/eye_comfort mean
+   the same thing on desktop and mobile. */
 :root {
   --navy: #1D2071;
   --navy-hover: #2b2f8c;
@@ -10,11 +16,33 @@
   --navy-divider: #33377a;
   --cyan: #00C0F3;
   --cyan-soft: #e3f8ff;
-  --text-muted: #6b7280;
   --sidebar-text-muted: #9fd6f0;
+  --sidebar-width: 240px;
+  --font-scale: 1;
+
   --body-bg: #ffffff;
   --card-bg: #ffffff;
-  --sidebar-width: 240px;
+  --border: #dde1ee;
+  --text-dark: #1D2071;
+  --text-muted: #6b7280;
+}
+
+[data-theme="dark"] {
+  --body-bg: #14161f;
+  --card-bg: #1c1f2b;
+  --border: #2b2f3d;
+  --text-dark: #f2f4fa;
+  --text-muted: #9aa0b4;
+  --cyan-soft: #0f2f3d;
+}
+
+[data-theme="eye_comfort"] {
+  --body-bg: #f4ecd8;
+  --card-bg: #faf3e3;
+  --border: #e3d5b8;
+  --text-dark: #4a3b23;
+  --text-muted: #8a7a5c;
+  --cyan-soft: #e9dcc0;
 }
 
 * { box-sizing: border-box; }
@@ -25,9 +53,11 @@ html, body {
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   background: var(--body-bg);
-  color: #111827;
+  color: var(--text-dark);
   overflow-x: hidden;
 }
+
+.hidden { display: none !important; }
 
 #app {
   display: flex;
@@ -113,7 +143,7 @@ html, body {
   background: transparent;
   border: none;
   color: #fff;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   padding: 10px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -132,8 +162,36 @@ html, body {
   border-top: 1px solid var(--navy-divider);
   font-size: 11px;
   color: var(--sidebar-text-muted);
-  text-align: center;
 }
+
+#footer-user-name {
+  text-align: center;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #fff;
+  font-size: calc(12px * var(--font-scale));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#footer-links {
+  display: flex;
+  gap: 8px;
+}
+
+.footer-link {
+  flex: 1;
+  background: var(--navy-hover);
+  border: none;
+  color: #fff;
+  font-size: calc(12px * var(--font-scale));
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.footer-link:hover { background: var(--navy-active); }
 
 /* ---------------------------------------------------------------- topbar (mobile) */
 
@@ -161,7 +219,7 @@ html, body {
 
 #topbar-title {
   font-weight: 600;
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -202,7 +260,165 @@ html, body {
   padding: 48px 24px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale));
+}
+
+/* ---------------------------------------------------------------- login */
+
+#login-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--navy);
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--card-bg);
+  border-radius: 16px;
+  padding: 32px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.login-logo { width: 64px; height: auto; margin-bottom: 12px; }
+.login-wordmark { font-weight: 700; font-size: 18px; color: var(--text-dark); }
+.login-tagline {
+  font-size: 12px;
+  color: var(--cyan);
+  margin: 2px 0 24px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.login-card label {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 12px 0 4px;
+}
+
+.login-card input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 15px;
+  color: var(--text-dark);
+  background: var(--body-bg);
+}
+
+.login-card input:focus { outline: 2px solid var(--cyan); }
+
+.login-error {
+  width: 100%;
+  color: #a32d2d;
+  font-size: 13px;
+  margin-top: 10px;
+  min-height: 1px;
+}
+
+#login-submit {
+  width: 100%;
+  margin-top: 20px;
+  background: var(--navy);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--cyan);
+  font-size: 13px;
+  margin-top: 14px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.login-help {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin: 16px 0 0;
+}
+
+/* ---------------------------------------------------------------- settings / team panels */
+
+.panel-view { padding: 24px 20px 48px; max-width: 520px; }
+
+.panel-section {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.panel-section h2 {
+  font-size: calc(15px * var(--font-scale));
+  margin: 0 0 12px;
+  color: var(--text-dark);
+}
+
+.panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: calc(14px * var(--font-scale));
+  color: var(--text-dark);
+}
+
+.panel-row select, .panel-row input[type="text"], .panel-row input[type="email"] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: calc(14px * var(--font-scale));
+  color: var(--text-dark);
+  background: var(--body-bg);
+}
+
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: calc(14px * var(--font-scale));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-primary { background: var(--cyan); color: #fff; }
+.btn-secondary { background: var(--cyan-soft); color: var(--navy); }
+.btn-danger { background: #fcebeb; color: #a32d2d; }
+
+.team-list { list-style: none; margin: 0; padding: 0; }
+.team-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: calc(13px * var(--font-scale));
+}
+.team-list li:last-child { border-bottom: none; }
+.team-list .team-role {
+  font-size: calc(11px * var(--font-scale));
+  color: var(--text-muted);
+  text-transform: capitalize;
 }
 
 .tool-card {

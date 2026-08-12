@@ -15,7 +15,29 @@
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<div id="app">
+
+<div id="login-screen">
+  <form id="login-form" class="login-card" autocomplete="on">
+    <img src="./icons/icon-192.png" alt="The Center logo" class="login-logo">
+    <div class="login-wordmark">The Center</div>
+    <div class="login-tagline">Office Tools</div>
+
+    <label for="login-email">Email</label>
+    <input id="login-email" name="email" type="email" autocomplete="username" required>
+
+    <label for="login-password">Password</label>
+    <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+
+    <div id="login-error" class="login-error" role="alert"></div>
+
+    <button type="submit" id="login-submit">Sign in</button>
+    <button type="button" id="login-forgot" class="link-btn">Forgot password?</button>
+
+    <p class="login-help">Don't have an account? Ask an Admin or Director to set one up for you.</p>
+  </form>
+</div>
+
+<div id="app" class="hidden">
   <div id="sidebar-scrim"></div>
 
   <nav id="sidebar" aria-label="Guides navigation">
@@ -28,7 +50,13 @@
       <input id="search-input" type="search" placeholder="Search guides…" aria-label="Search guides">
     </div>
     <div id="nav-list" role="list"></div>
-    <div id="sidebar-footer">Updates automatically from the office GitHub repo</div>
+    <div id="sidebar-footer">
+      <div id="footer-user-name"></div>
+      <div id="footer-links">
+        <button id="settings-nav-btn" class="footer-link" type="button">Settings</button>
+        <button id="team-nav-btn" class="footer-link" type="button" style="display:none;">Team</button>
+      </div>
+    </div>
   </nav>
 
   <div id="content-wrap">
@@ -40,10 +68,17 @@
       <div id="loading" style="display:none;">Loading…</div>
       <div id="empty-state" style="display:none;">Nothing to show yet.</div>
       <iframe id="content-frame" title="Document viewer" style="display:none;"></iframe>
+      <div id="settings-view" class="panel-view" style="display:none;"></div>
+      <div id="team-view" class="panel-view" style="display:none;"></div>
     </div>
   </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="./firebase-config.js"></script>
+<script src="./auth.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
