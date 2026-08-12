@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whitley County Resource Directory</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  .controls {
+    display: flex; flex-direction: column; gap: 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 20px; position: sticky; top: 0; z-index: 5;
+  }
+  .searchrow { display: flex; gap: 10px; }
+  input[type=search] {
+    flex: 1; font: inherit; font-size: 15px; padding: 10px 14px; border: 1px solid var(--line);
+    border-radius: 8px; outline: none;
+  }
+  input[type=search]:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 8px; padding: 10px 16px; cursor: pointer; font-weight: 600; }
+  .primary { background: var(--blue); color: #fff; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 20px;
+    border: 1px solid var(--line); background: #fafbfc; color: var(--muted); cursor: pointer;
+    user-select: none;
+  }
+  .chip.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .count { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+
+  .cat { margin-bottom: 28px; }
+  .cat h2 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 12px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+  }
+  .card h3 { font-size: 14.5px; margin-bottom: 6px; line-height: 1.3; }
+  .card .phones { font-size: 13.5px; color: var(--ink); margin-bottom: 4px; }
+  .card .phones a { color: var(--blue); text-decoration: none; font-weight: 600; }
+  .card .phones a:hover { text-decoration: underline; }
+  .card .link { font-size: 13px; }
+  .card .link a { color: var(--blue); text-decoration: none; }
+  .card .link a:hover { text-decoration: underline; }
+  .empty { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
+
+  .footnote { font-size: 12.5px; color: var(--muted); margin-top: 36px; border-top: 1px solid var(--line); padding-top: 16px; line-height: 1.6; }
+
+  @media print {
+    .controls, .footnote button { display: none; }
+    body { padding: 0; background: #fff; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Whitley County Resource Directory</h1>
+  <p class="sub">Local resources for families and staff — search by name or phone, or filter by category. Sourced from the Whitley County Resource Guide (updated 2023).</p>
+
+  <div class="controls">
+    <div class="searchrow">
+      <input type="search" id="q" placeholder="Search by name, phone, or keyword…" autofocus>
+      <button class="ghost" id="clearBtn" type="button">Clear</button>
+      <button class="primary" id="printBtn" type="button">Print</button>
+    </div>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="count" id="count"></div>
+  <div id="results"></div>
+
+  <div class="footnote">
+    Source: Whitley County Resource Guide, updated 2023. Numbers change — if something here is out of date, update the <code>RESOURCES</code> list near the top of this file's script and save; no rebuild needed, just refresh in the launcher. For anything urgent or safety-related, use the Emergency Services category or dial 911.
+  </div>
+</div>
+
+<script>
+// ---- Data: parsed from the Whitley County Resource Guide (2023) ----
+// Each entry: { name, phones: [{label?, number}], url?, category }
+const RESOURCES = [
+  // Programming / Childcare
+  { category: "Programming & Childcare", name: "Churubusco Community Childcare", phones: [{number: "(260) 693-2966"}] },
+  { category: "Programming & Childcare", name: "Columbia City United Methodist", phones: [{number: "(260) 244-3491"}] },
+  { category: "Programming & Childcare", name: "Big Lake Church of God", phones: [{number: "(260) 691-3503"}] },
+  { category: "Programming & Childcare", name: "YMCA Armstrong Early Learning", phones: [{number: "(260) 244-9622"}] },
+  { category: "Programming & Childcare", name: "The Center for Whitley County Youth Inc.", phones: [
+      {label: "Columbia City", number: "(260) 248-4977"}, {label: "South Whitley", number: "(260) 251-7507"}, {label: "Churubusco", number: "(260) 248-4977"}
+  ]},
+  { category: "Programming & Childcare", name: "Sonshine Child Care Ministry", phones: [{number: "(260) 723-5105"}] },
+  { category: "Programming & Childcare", name: "Camp Whitley", phones: [], url: "http://www.campwhitley.org" },
+  { category: "Programming & Childcare", name: "Whitley County Family YMCA Camp", phones: [{number: "(260) 244-9622"}] },
+  { category: "Programming & Childcare", name: "One Community Kids Connect", phones: [{number: "(260) 609-0281"}] },
+  { category: "Programming & Childcare", name: "Indiana Childcare Finder", phones: [], url: "https://www.in.gov/fssa/childcarefinder/" },
+  { category: "Programming & Childcare", name: "Library — Peabody", phones: [{number: "(260) 244-5541"}] },
+  { category: "Programming & Childcare", name: "Library — Churubusco", phones: [{number: "(260) 693-6466"}] },
+  { category: "Programming & Childcare", name: "Library — South Whitley", phones: [{number: "(260) 723-5321"}] },
+  { category: "Programming & Childcare", name: "Boy Scouts", phones: [{number: "(260) 432-9593"}] },
+  { category: "Programming & Childcare", name: "Girl Scouts of Northern Indiana", phones: [{number: "(800) 283-4812"}] },
+  { category: "Programming & Childcare", name: "Big Brothers Big Sisters", phones: [{number: "(888) 456-1600"}] },
+  { category: "Programming & Childcare", name: "Children's First Center", phones: [{number: "(260) 925-3865"}] },
+  { category: "Programming & Childcare", name: "Before5", phones: [{number: "(260) 927-4610"}] },
+  { category: "Programming & Childcare", name: "BABE", phones: [{number: "(260) 244-2820"}] },
+  { category: "Programming & Childcare", name: "Junior Achievement", phones: [{number: "(260) 414-8034"}] },
+  { category: "Programming & Childcare", name: "Purdue Extension / 4-H", phones: [{number: "(260) 244-7615"}] },
+  { category: "Programming & Childcare", name: "Children's Autism Center", phones: [{number: "(260) 459-6040"}] },
+
+  // Housing
+  { category: "Housing", name: "Woodlands Senior Activity Center", phones: [{number: "(260) 248-8944"}] },
+  { category: "Housing", name: "Mission25", phones: [{number: "(260) 244-5266"}] },
+  { category: "Housing", name: "Cancer Services of NE Indiana", phones: [{number: "(260) 484-9560"}] },
+  { category: "Housing", name: "Remnant Ministries", phones: [{number: "(260) 388-6020"}] },
+  { category: "Housing", name: "Easterseals Passages", phones: [{number: "(260) 244-7688"}] },
+  { category: "Housing", name: "The Lighthouse", phones: [{number: "(260) 255-6413"}] },
+  { category: "Housing", name: "Giving Gardens of Indiana", phones: [{number: "(260) 609-6784"}] },
+  { category: "Housing", name: "Whitley Crossings Neighborhood Corporation", phones: [], url: "http://www.whitleycrossings.org" },
+  { category: "Housing", name: "NE Indiana CASA", phones: [{number: "(260) 636-6101"}] },
+  { category: "Housing", name: "Miller's Merry Manor / Oak Pointe", phones: [{number: "(260) 248-8101"}] },
+  { category: "Housing", name: "Biggs Property Management", phones: [{number: "(260) 724-9131"}] },
+
+  // Counseling & Substance Use
+  { category: "Counseling & Substance Use", name: "Bowen Center", phones: [{number: "(260) 248-8176"}] },
+  { category: "Counseling & Substance Use", name: "The Impact Center, Inc.", phones: [{number: "(260) 244-7300"}] },
+  { category: "Counseling & Substance Use", name: "Live Heal Grow Counseling", phones: [{number: "(260) 244-0264"}] },
+  { category: "Counseling & Substance Use", name: "Lavon Fletcher", phones: [{number: "(260) 244-5690"}] },
+  { category: "Counseling & Substance Use", name: "Meridian Health Services", phones: [{number: "(260) 436-0932"}] },
+  { category: "Counseling & Substance Use", name: "Parkview Behavioral Health", phones: [{number: "(260) 244-5209"}] },
+  { category: "Counseling & Substance Use", name: "Addiction Support Line", phones: [{number: "1-800-304-2219"}] },
+  { category: "Counseling & Substance Use", name: "Brightpoint", phones: [{number: "(800) 589-3506"}] },
+  { category: "Counseling & Substance Use", name: "YWCA of Northeast Indiana", phones: [{number: "(260) 424-4908"}] },
+  { category: "Counseling & Substance Use", name: "Multi-County Medical Outreach Clinic", phones: [{number: "(260) 564-1946"}] },
+
+  // Food Assistance
+  { category: "Food Assistance", name: "South Whitley Food Bank", phones: [{number: "(260) 212-2964"}] },
+  { category: "Food Assistance", name: "Churubusco United Methodist", phones: [{number: "(260) 693-2154"}] },
+  { category: "Food Assistance", name: "Grace Evangelical Lutheran", phones: [{number: "(260) 244-7118"}] },
+  { category: "Food Assistance", name: "Big Lake Church of God", phones: [{number: "(260) 691-3503"}] },
+  { category: "Food Assistance", name: "Tri-Lakes Baptist", phones: [{number: "(260) 691-2553"}] },
+  { category: "Food Assistance", name: "St. Paul of the Cross Catholic", phones: [{number: "(260) 244-5723"}] },
+  { category: "Food Assistance", name: "First Church of God (non-food pantry)", phones: [{number: "(260) 244-5959"}] },
+  { category: "Food Assistance", name: "Farm Wagon", phones: [{number: "(260) 447-3696"}] },
+  { category: "Food Assistance", name: "The Clothing Closet at Bridge of Hope", phones: [{number: "(260) 327-3707"}] },
+  { category: "Food Assistance", name: "Eberhard Lutheran Clothing Bank", phones: [{number: "(260) 244-5059"}] },
+  { category: "Food Assistance", name: "Tri-Lakes Baptist Clothing Giveaway", phones: [{number: "(260) 691-2553"}] },
+  { category: "Food Assistance", name: "Milk Depot (Breast Milk)", phones: [{number: "(260) 248-3121"}] },
+  { category: "Food Assistance", name: "Community of Hope Church", phones: [{number: "(260) 248-2725"}] },
+  { category: "Food Assistance", name: "The Salvation Army of Whitley County", phones: [{number: "(260) 248-1711"}] },
+
+  // Financial / Other Assistance
+  { category: "Financial & Other Assistance", name: "American Legion Post 157", phones: [{number: "(260) 693-6263"}] },
+  { category: "Financial & Other Assistance", name: "Veterans of Foreign Wars", phones: [{number: "(260) 244-4813"}, {number: "(260) 693-9257"}, {number: "(260) 723-5212"}] },
+  { category: "Financial & Other Assistance", name: "Veteran's Services", phones: [{number: "(260) 248-3189"}] },
+  { category: "Financial & Other Assistance", name: "Whitley County Township Trustee", phones: [], url: "https://www.whitleygov.com/" },
+  { category: "Financial & Other Assistance", name: "Whitley County FSSA (SNAP) Office", phones: [{number: "(800) 403-0864"}] },
+  { category: "Financial & Other Assistance", name: "Department of Child Services — local office", phones: [{number: "(260) 244-6531"}] },
+  { category: "Financial & Other Assistance", name: "Department of Child Services — reporting hotline", phones: [{number: "1-800-800-5556"}] },
+  { category: "Financial & Other Assistance", name: "One Community", phones: [{number: "(260) 609-0281"}] },
+  { category: "Financial & Other Assistance", name: "Helpline of Whitley County", phones: [{number: "(260) 244-7671"}] },
+  { category: "Financial & Other Assistance", name: "Leadership Whitley County", phones: [{number: "(260) 244-5506"}] },
+  { category: "Financial & Other Assistance", name: "Parkview Financial Assistance", phones: [{number: "(260) 266-6700"}] },
+
+  // Education / Career
+  { category: "Education & Career", name: "Freedom Academy", phones: [{number: "(260) 347-0887"}] },
+  { category: "Education & Career", name: "WorkOne", phones: [{number: "(260) 248-8611"}] },
+  { category: "Education & Career", name: "Peoplelink Staffing Solutions", phones: [{number: "(260) 244-4977"}] },
+  { category: "Education & Career", name: "LookUpIndiana.org", phones: [], url: "http://www.LookUpIndiana.org" },
+  { category: "Education & Career", name: "Whitley County Map Hub", phones: [], url: "https://maphub.net/WhitleyCounty" },
+
+  // Emergency Services
+  { category: "Emergency Services", name: "Domestic Violence Crisis Line", phones: [{number: "1-800-441-4073"}] },
+  { category: "Emergency Services", name: "Victim Assistance", phones: [{number: "(260) 244-2332"}] },
+  { category: "Emergency Services", name: "Youth Services Bureau", phones: [{number: "(260) 356-9681"}] },
+  { category: "Emergency Services", name: "American Red Cross", phones: [{number: "(260) 484-9336"}] },
+  { category: "Emergency Services", name: "24/7 Crisis Line", phones: [{number: "(260) 530-7676"}] },
+  { category: "Emergency Services", name: "Youth Summer Feeding Program", phones: [{number: "1-866-348-6479"}] },
+  { category: "Emergency Services", name: "Statewide Resource Line", phones: [{number: "211"}] },
+];
+
+const CATS = [...new Set(RESOURCES.map(r => r.category))];
+let activeCat = null;
+
+function telHref(num) { return "tel:" + num.replace(/[^\d+]/g, ""); }
+function isPhoneLike(s) { return /\d{3}/.test(s); }
+
+function renderChips() {
+  const chips = document.getElementById("chips");
+  chips.innerHTML = "";
+  const all = document.createElement("div");
+  all.className = "chip" + (activeCat === null ? " active" : "");
+  all.textContent = "All";
+  all.onclick = () => { activeCat = null; render(); };
+  chips.appendChild(all);
+  CATS.forEach(c => {
+    const el = document.createElement("div");
+    el.className = "chip" + (activeCat === c ? " active" : "");
+    el.textContent = c;
+    el.onclick = () => { activeCat = (activeCat === c ? null : c); render(); };
+    chips.appendChild(el);
+  });
+}
+
+function matches(r, term) {
+  if (!term) return true;
+  const hay = (r.name + " " + r.category + " " + r.phones.map(p => p.number).join(" ")).toLowerCase();
+  return hay.includes(term.toLowerCase());
+}
+
+function render() {
+  const term = document.getElementById("q").value.trim();
+  const filtered = RESOURCES.filter(r => (activeCat === null || r.category === activeCat) && matches(r, term));
+  const results = document.getElementById("results");
+  document.getElementById("count").textContent = filtered.length + (filtered.length === 1 ? " resource" : " resources");
+  results.innerHTML = "";
+
+  if (!filtered.length) {
+    results.innerHTML = '<div class="empty">No resources match that search.</div>';
+    return;
+  }
+
+  const byCat = {};
+  filtered.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
+
+  Object.keys(byCat).forEach(cat => {
+    const section = document.createElement("div");
+    section.className = "cat";
+    const h2 = document.createElement("h2");
+    h2.textContent = cat;
+    section.appendChild(h2);
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    byCat[cat].forEach(r => {
+      const card = document.createElement("div");
+      card.className = "card";
+      let html = `<h3>${r.name}</h3>`;
+      r.phones.forEach(p => {
+        html += `<div class="phones">${p.label ? p.label + ": " : ""}<a href="${telHref(p.number)}">${p.number}</a></div>`;
+      });
+      if (r.url) {
+        html += `<div class="link"><a href="${r.url}" target="_blank" rel="noopener">${r.url.replace(/^https?:\/\//, "")}</a></div>`;
+      }
+      card.innerHTML = html;
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    results.appendChild(section);
+  });
+}
+
+document.getElementById("q").addEventListener("input", render);
+document.getElementById("clearBtn").addEventListener("click", () => { document.getElementById("q").value = ""; activeCat = null; render(); });
+document.getElementById("printBtn").addEventListener("click", () => window.print());
+
+renderChips();
+render();
+</script>
+</body>
+</html>

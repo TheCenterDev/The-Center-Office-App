@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Hire Onboarding Tracker</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+
+  .hirebar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  select, input[type=text], input[type=date] {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; outline: none;
+  }
+  select:focus, input:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
+  .primary { background: var(--blue); color: #fff; }
+  .primary:disabled { background: #b9c4dd; cursor: not-allowed; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+
+  .progresswrap { margin: 16px 0 4px; }
+  .progressbar { height: 10px; border-radius: 6px; background: var(--line); overflow: hidden; }
+  .progressfill { height: 100%; background: var(--blue); transition: width .2s; }
+  .progresslabel { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  section.group { margin-bottom: 22px; }
+  section.group h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 10px; }
+  .item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; }
+  .item input[type=checkbox] { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--blue); cursor: pointer; }
+  .item label { font-size: 14.5px; line-height: 1.45; cursor: pointer; }
+  .item.done label { color: var(--muted); text-decoration: line-through; }
+  .item .hint { display: block; font-size: 12.5px; color: var(--muted); margin-top: 1px; text-decoration: none; }
+  .item a.dl { color: var(--blue); font-weight: 600; text-decoration: none; }
+  .item a.dl:hover { text-decoration: underline; }
+
+  .addrow { display: flex; gap: 8px; margin-top: 8px; }
+  .addrow input { flex: 1; }
+
+  .notifybar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  .notifybar .who { font-size: 12.5px; color: var(--muted); }
+
+  .banner { border-radius: 12px; padding: 14px 18px; font-size: 14px; font-weight: 600; margin-bottom: 20px; }
+  .banner.ok { background: var(--green-bg); color: var(--green); }
+
+  .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>New Hire Onboarding Tracker</h1>
+  <p class="sub">Track a new hire's onboarding checklist and send progress updates to the directors — no separate spreadsheet needed.</p>
+
+  <div class="card">
+    <div class="hirebar">
+      <select id="hireSelect"></select>
+      <button class="ghost" id="newHireBtn" type="button">+ New Hire</button>
+      <button class="danger" id="removeHireBtn" type="button">Remove This Hire</button>
+    </div>
+  </div>
+
+  <div id="hireArea"></div>
+</div>
+
+<script>
+// Directors / admin contacts (from the Key Contacts page) who get onboarding-progress emails.
+const DIRECTORS = [
+  { name: "Jeff Wike", role: "Executive Director", email: "jeff@thecentercc.com" },
+  { name: "Brad Boyles", role: "IT and Director", email: "brad@thecentercc.com" },
+  { name: "Jake Johnson", role: "Director of Operations", email: "jake@thecentercc.com" },
+  { name: "Shawna Balsiger", role: "Director of Affairs", email: "shawna@thecentercc.com" },
+  { name: "Dave Wieringa", role: "Head of Leadership", email: "dave@thecentercc.com" },
+  { name: "Sarah Johnson", role: "Director of Finance and HR", email: "sarah@thecentercc.com" },
+];
+
+// Checklist grounded in The Center Employee Handbook + Key Contacts.
+const CHECKLIST = [
+  { group: "Accounts & Access", items: [
+    { id: "gdrive", text: "Confirm Google Drive shared-drive access (put everything in the shared drive, not a personal drive)" },
+    { id: "email", text: "Company email set up and checked" },
+    { id: "apricot", text: "Apricot access requested by emailing Sarah and Brad", hint: "Only needed if this role interacts with students — new hires don't get a login automatically." },
+    { id: "card", text: "Company credit card issued and Expensify account set up", hint: "Keep every receipt and enter it in Expensify; mileage for any off-site work trip is reimbursable the same way." },
+    { id: "claude", text: "Download the Claude desktop app", link: "https://claude.ai/download", linkText: "claude.ai/download" },
+  ]},
+  { group: "Benefits & Pay", items: [
+    { id: "ira", text: "T Rowe Price IRA enrollment reviewed (up to 3% match)", hint: "Contact Sarah with questions about the paperwork." },
+    { id: "tasc", text: "TASC Health Reimbursement Account set up and app downloaded", hint: "Up to $4,000/year, resets every July 1 — keep all medical receipts." },
+    { id: "smartdollar", text: "SmartDollar / EveryDollar account activated", hint: "Free access to Dave Ramsey's FPU content and 1:1 coaching." },
+    { id: "pto", text: "Reviewed PTO policy and how to request time off", hint: "Email Sarah and your direct supervisor; time off is tracked in your shared Google Sheet." },
+    { id: "pay", text: "Reviewed pay schedule (paid the 5th and 20th) and pay-stub access" },
+  ]},
+  { group: "Policies & Handbooks", items: [
+    { id: "handbook", text: "Read The Center Employee Handbook" },
+    { id: "serve", text: "Read the Revised SERVE Policies and Procedures Handbook" },
+    { id: "contacts", text: "Reviewed the Key Contacts page — knows who to ask for what" },
+  ]},
+  { group: "Orientation", items: [
+    { id: "supervisor", text: "Met with direct supervisor / Head of Leadership (Dave Wieringa)" },
+    { id: "tour", text: "Toured the building and reviewed the evacuation route" },
+    { id: "calendar", text: "Set up calendar habits — meetings, donor appointments, and vacation time all get put on the calendar" },
+  ]},
+];
+
+const STORAGE_KEY = "center_onboarding_tracker_v1";
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function save(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+
+let data = load(); // { hireId: { name, startDate, checked: {itemId: bool}, custom: [{id,text}] } }
+let currentId = Object.keys(data)[0] || null;
+
+function allItemIds(hire) {
+  const ids = [];
+  CHECKLIST.forEach(g => g.items.forEach(i => ids.push(i.id)));
+  (hire.custom || []).forEach(c => ids.push(c.id));
+  return ids;
+}
+
+function progress(hire) {
+  const ids = allItemIds(hire);
+  const checked = ids.filter(id => hire.checked && hire.checked[id]).length;
+  return { checked, total: ids.length, pct: ids.length ? Math.round(100 * checked / ids.length) : 0 };
+}
+
+function renderHireSelect() {
+  const sel = document.getElementById("hireSelect");
+  sel.innerHTML = "";
+  const ids = Object.keys(data);
+  if (!ids.length) {
+    const opt = document.createElement("option");
+    opt.textContent = "No hires yet — click + New Hire";
+    sel.appendChild(opt);
+    return;
+  }
+  ids.forEach(id => {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = data[id].name || "(unnamed)";
+    if (id === currentId) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function newHire() {
+  const name = prompt("New hire's name:");
+  if (!name) return;
+  const id = "h" + Date.now();
+  data[id] = { name, startDate: "", checked: {}, custom: [] };
+  currentId = id;
+  save(data);
+  renderHireSelect();
+  renderHireArea();
+}
+
+function removeHire() {
+  if (!currentId) return;
+  if (!confirm("Remove " + (data[currentId].name || "this hire") + "'s onboarding record? This can't be undone.")) return;
+  delete data[currentId];
+  currentId = Object.keys(data)[0] || null;
+  save(data);
+  renderHireSelect();
+  renderHireArea();
+}
+
+function mailtoLink(subject, body) {
+  const to = DIRECTORS.map(d => d.email).join(",");
+  return "mailto:" + to + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+}
+
+function buildUpdateBody(hire) {
+  const p = progress(hire);
+  let body = `Onboarding update for ${hire.name}${hire.startDate ? " (start date " + hire.startDate + ")" : ""}\n`;
+  body += `Progress: ${p.checked}/${p.total} items complete (${p.pct}%)\n\n`;
+  CHECKLIST.forEach(g => {
+    body += g.group + ":\n";
+    g.items.forEach(i => {
+      body += `  [${hire.checked && hire.checked[i.id] ? "x" : " "}] ${i.text}\n`;
+    });
+  });
+  if (hire.custom && hire.custom.length) {
+    body += "\nAdditional items:\n";
+    hire.custom.forEach(c => body += `  [${hire.checked && hire.checked[c.id] ? "x" : " "}] ${c.text}\n`);
+  }
+  return body;
+}
+
+function renderHireArea() {
+  const area = document.getElementById("hireArea");
+  area.innerHTML = "";
+  if (!currentId || !data[currentId]) {
+    area.innerHTML = '<div class="empty">Add a new hire above to start their onboarding checklist.</div>';
+    return;
+  }
+  const hire = data[currentId];
+  const p = progress(hire);
+
+  const card = document.createElement("div");
+  card.className = "card";
+
+  let html = "";
+  if (p.pct === 100 && p.total > 0) {
+    html += `<div class="banner ok">🎉 ${hire.name} has completed every onboarding item.</div>`;
+  }
+  html += `<div class="addrow" style="margin-bottom:14px;">
+    <input type="text" id="startDate" placeholder="Start date (e.g. 2026-08-25)" value="${hire.startDate || ""}">
+  </div>`;
+  html += `<div class="progresswrap"><div class="progressbar"><div class="progressfill" style="width:${p.pct}%"></div></div>
+    <div class="progresslabel">${p.checked} of ${p.total} complete (${p.pct}%)</div></div>`;
+  card.innerHTML = html;
+  area.appendChild(card);
+
+  card.querySelector("#startDate").addEventListener("change", e => {
+    hire.startDate = e.target.value; save(data);
+  });
+
+  CHECKLIST.forEach(g => {
+    const sec = document.createElement("section");
+    sec.className = "group card";
+    let inner = `<h2>${g.group}</h2>`;
+    g.items.forEach(i => {
+      const done = hire.checked && hire.checked[i.id];
+      inner += `<div class="item ${done ? "done" : ""}">
+        <input type="checkbox" data-id="${i.id}" ${done ? "checked" : ""}>
+        <label for="cb_${i.id}">${i.text}${i.hint ? `<span class="hint">${i.hint}</span>` : ""}${i.link ? `<span class="hint"><a class="dl" href="${i.link}" target="_blank" rel="noopener">${i.linkText}</a></span>` : ""}</label>
+      </div>`;
+    });
+    sec.innerHTML = inner;
+    sec.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.addEventListener("change", () => {
+        hire.checked = hire.checked || {};
+        hire.checked[cb.dataset.id] = cb.checked;
+        save(data);
+        renderHireArea();
+      });
+    });
+    area.appendChild(sec);
+  });
+
+  // Custom items
+  const customSec = document.createElement("section");
+  customSec.className = "group card";
+  let customHtml = "<h2>Additional Items</h2>";
+  (hire.custom || []).forEach(c => {
+    const done = hire.checked && hire.checked[c.id];
+    customHtml += `<div class="item ${done ? "done" : ""}">
+      <input type="checkbox" data-id="${c.id}" ${done ? "checked" : ""}>
+      <label>${c.text}</label>
+    </div>`;
+  });
+  customHtml += `<div class="addrow"><input type="text" id="customInput" placeholder="Add a custom checklist item…"><button class="ghost" id="addCustomBtn" type="button">Add</button></div>`;
+  customSec.innerHTML = customHtml;
+  customSec.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener("change", () => {
+      hire.checked = hire.checked || {};
+      hire.checked[cb.dataset.id] = cb.checked;
+      save(data);
+      renderHireArea();
+    });
+  });
+  customSec.querySelector("#addCustomBtn").addEventListener("click", () => {
+    const val = customSec.querySelector("#customInput").value.trim();
+    if (!val) return;
+    hire.custom = hire.custom || [];
+    hire.custom.push({ id: "c" + Date.now(), text: val });
+    save(data);
+    renderHireArea();
+  });
+  area.appendChild(customSec);
+
+  // Notify bar
+  const notifyCard = document.createElement("div");
+  notifyCard.className = "card notifybar";
+  notifyCard.innerHTML = `
+    <div class="who">Sends to: ${DIRECTORS.map(d => d.name).join(", ")}</div>
+    <a class="primary" style="text-decoration:none; display:inline-block;" href="${mailtoLink(
+      (p.pct === 100 ? "Onboarding Complete: " : "Onboarding Update: ") + hire.name,
+      buildUpdateBody(hire)
+    )}">Email Progress to Admin/Directors</a>
+  `;
+  area.appendChild(notifyCard);
+}
+
+document.getElementById("hireSelect").addEventListener("change", e => { currentId = e.target.value; renderHireArea(); });
+document.getElementById("newHireBtn").addEventListener("click", newHire);
+document.getElementById("removeHireBtn").addEventListener("click", removeHire);
+
+renderHireSelect();
+renderHireArea();
+</script>
+</body>
+</html>

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building Maintenance Log</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; }
+
+  .formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .formgrid { grid-template-columns: 1fr; } }
+  .formgrid .full { grid-column: 1 / -1; }
+  label.fl { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  select, input[type=text], input[type=date], textarea {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
+    outline: none; width: 100%; background: #fff;
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  select:focus, input:focus, textarea:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
+  .primary { background: var(--blue); color: #fff; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .stat .n { font-size: 22px; font-weight: 700; }
+  .stat .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chip { font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--line); background: #fafbfc; color: var(--muted); cursor: pointer; }
+  .chip.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+  .tablewrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 13px; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { background: #fafbfc; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: none; }
+  td.desc { max-width: 320px; white-space: normal; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 2px 10px; }
+  .tag.low { background: var(--green-bg); color: var(--green); }
+  .tag.med { background: var(--amber-bg); color: var(--amber); }
+  .tag.high, .tag.urgent { background: var(--red-bg); color: var(--red); }
+  select.statusSelect { font-size: 12.5px; padding: 5px 8px; }
+  .thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; cursor: pointer; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Building Maintenance Log</h1>
+  <p class="sub">Log a facility issue, track its status, and export the list any time — one place instead of scattered notes docs.</p>
+
+  <div class="card">
+    <h2>Log a New Issue</h2>
+    <div class="formgrid">
+      <div>
+        <label class="fl">Location</label>
+        <select id="location">
+          <option>Columbia City — Main Building</option>
+          <option>Columbia City — Parsonage</option>
+          <option>South Whitley Site</option>
+          <option>Churubusco Site</option>
+          <option>Whitko Site</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div>
+        <label class="fl">Priority</label>
+        <select id="priority">
+          <option value="Low">Low</option>
+          <option value="Med" selected>Medium</option>
+          <option value="High">High</option>
+          <option value="Urgent">Urgent</option>
+        </select>
+      </div>
+      <div>
+        <label class="fl">Reported By</label>
+        <input type="text" id="reporter" placeholder="Your name">
+      </div>
+      <div>
+        <label class="fl">Date</label>
+        <input type="date" id="dateReported">
+      </div>
+      <div class="full">
+        <label class="fl">Description</label>
+        <textarea id="description" placeholder="What's the issue? Where exactly? Any safety concern?"></textarea>
+      </div>
+      <div class="full">
+        <label class="fl">Photo (optional)</label>
+        <input type="file" id="photo" accept="image/*">
+      </div>
+    </div>
+    <div class="row" style="margin-top: 14px;">
+      <button class="primary" id="addBtn" type="button">Add Issue</button>
+      <span id="formMsg" style="font-size:13px; color:var(--muted);"></span>
+    </div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="filters" id="filters"></div>
+
+  <div class="row" style="margin-bottom: 14px; justify-content: flex-end;">
+    <button class="ghost" id="exportBtn" type="button">Export CSV</button>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Date</th><th>Location</th><th>Description</th><th>Priority</th><th>Reported By</th><th>Photo</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div id="emptyState"></div>
+</div>
+
+<script>
+const STORAGE_KEY = "center_maintenance_log_v1";
+function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; } }
+function save(items) { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }
+
+let items = load();
+let statusFilter = "All";
+
+function priorityRank(p) { return { Urgent: 0, High: 1, Med: 2, Low: 3 }[p] ?? 4; }
+function tagClass(p) { return { Urgent: "urgent", High: "high", Med: "med", Low: "low" }[p] || "low"; }
+
+function readFileAsDataURL(file, cb) {
+  const reader = new FileReader();
+  reader.onload = () => cb(reader.result);
+  reader.readAsDataURL(file);
+}
+
+document.getElementById("addBtn").addEventListener("click", () => {
+  const location = document.getElementById("location").value;
+  const priority = document.getElementById("priority").value;
+  const reporter = document.getElementById("reporter").value.trim();
+  const dateReported = document.getElementById("dateReported").value || new Date().toISOString().slice(0, 10);
+  const description = document.getElementById("description").value.trim();
+  const photoInput = document.getElementById("photo");
+  const msg = document.getElementById("formMsg");
+
+  if (!description) { msg.textContent = "Add a description first."; msg.style.color = "var(--red)"; return; }
+
+  const entry = { id: "m" + Date.now(), location, priority, reporter, dateReported, description, status: "Open", photo: null };
+
+  const finish = () => {
+    items.unshift(entry);
+    save(items);
+    document.getElementById("description").value = "";
+    document.getElementById("reporter").value = "";
+    photoInput.value = "";
+    msg.textContent = "Added.";
+    msg.style.color = "var(--green)";
+    render();
+    setTimeout(() => { msg.textContent = ""; }, 2500);
+  };
+
+  if (photoInput.files && photoInput.files[0]) {
+    const file = photoInput.files[0];
+    if (file.size > 1_500_000) {
+      msg.textContent = "That photo is large — logged without it (email it separately if needed).";
+      msg.style.color = "var(--amber)";
+      finish();
+      return;
+    }
+    readFileAsDataURL(file, dataUrl => { entry.photo = dataUrl; finish(); });
+  } else {
+    finish();
+  }
+});
+
+function renderStats() {
+  const stats = document.getElementById("stats");
+  const open = items.filter(i => i.status === "Open").length;
+  const inProgress = items.filter(i => i.status === "In Progress").length;
+  const done = items.filter(i => i.status === "Done").length;
+  const urgent = items.filter(i => i.status !== "Done" && (i.priority === "Urgent" || i.priority === "High")).length;
+  stats.innerHTML = `
+    <div class="stat"><div class="n">${open}</div><div class="l">Open</div></div>
+    <div class="stat"><div class="n">${inProgress}</div><div class="l">In Progress</div></div>
+    <div class="stat"><div class="n">${done}</div><div class="l">Done</div></div>
+    <div class="stat"><div class="n">${urgent}</div><div class="l">High/Urgent &amp; Unresolved</div></div>
+  `;
+}
+
+function renderFilters() {
+  const filters = document.getElementById("filters");
+  const options = ["All", "Open", "In Progress", "Done"];
+  filters.innerHTML = "";
+  options.forEach(o => {
+    const chip = document.createElement("div");
+    chip.className = "chip" + (statusFilter === o ? " active" : "");
+    chip.textContent = o;
+    chip.onclick = () => { statusFilter = o; render(); };
+    filters.appendChild(chip);
+  });
+}
+
+function render() {
+  renderStats();
+  renderFilters();
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+  let visible = items.filter(i => statusFilter === "All" || i.status === statusFilter);
+  visible = visible.slice().sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority) || (b.dateReported || "").localeCompare(a.dateReported || ""));
+
+  document.getElementById("emptyState").innerHTML = visible.length ? "" : '<div class="empty">No maintenance issues logged yet — add one above.</div>';
+
+  visible.forEach(item => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${item.dateReported || ""}</td>
+      <td>${item.location}</td>
+      <td class="desc">${item.description}</td>
+      <td><span class="tag ${tagClass(item.priority)}">${item.priority}</span></td>
+      <td>${item.reporter || "—"}</td>
+      <td>${item.photo ? `<img class="thumb" src="${item.photo}" title="Click to view full size">` : "—"}</td>
+      <td>
+        <select class="statusSelect" data-id="${item.id}">
+          <option ${item.status === "Open" ? "selected" : ""}>Open</option>
+          <option ${item.status === "In Progress" ? "selected" : ""}>In Progress</option>
+          <option ${item.status === "Done" ? "selected" : ""}>Done</option>
+        </select>
+      </td>
+      <td><button class="danger" data-remove="${item.id}" type="button">Delete</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll(".statusSelect").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const item = items.find(i => i.id === sel.dataset.id);
+      if (item) { item.status = sel.value; save(items); render(); }
+    });
+  });
+  tbody.querySelectorAll("[data-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (!confirm("Delete this entry?")) return;
+      items = items.filter(i => i.id !== btn.dataset.remove);
+      save(items);
+      render();
+    });
+  });
+  tbody.querySelectorAll(".thumb").forEach(img => {
+    img.addEventListener("click", () => { window.open(img.src, "_blank"); });
+  });
+}
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const header = ["Date", "Location", "Description", "Priority", "Reported By", "Status"];
+  const rows = items.map(i => [i.dateReported, i.location, i.description.replace(/\n/g, " "), i.priority, i.reporter, i.status]);
+  const csv = [header, ...rows].map(r => r.map(v => `"${String(v || "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "building-maintenance-log.csv";
+  a.click();
+});
+
+render();
+</script>
+</body>
+</html>
