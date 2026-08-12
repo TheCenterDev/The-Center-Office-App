@@ -22,7 +22,7 @@
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
 
   .hirebar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-  select, input[type=text], input[type=date] {
+  select, input[type=text], input[type=date], input[type=email], input[type=password] {
     font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; outline: none;
   }
   select:focus, input:focus { border-color: var(--blue); }
@@ -57,25 +57,77 @@
   .banner.ok { background: var(--green-bg); color: var(--green); }
 
   .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+
+  .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+  .topbar button { padding: 5px 10px; font-size: 12.5px; }
+
+  #authGate { max-width: 360px; margin: 60px auto; }
+  #authGate .card { text-align: center; }
+  #authGate label { text-align: left; display: block; margin-top: 10px; }
+  #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
+  #appArea { display: none; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>New Hire Onboarding Tracker</h1>
-  <p class="sub">Track a new hire's onboarding checklist and send progress updates to the directors — no separate spreadsheet needed.</p>
+  <p class="sub">Track a new hire's onboarding checklist and send progress updates to the directors — shared live across everyone signed in, on any device.</p>
 
-  <div class="card">
-    <div class="hirebar">
-      <select id="hireSelect"></select>
-      <button class="ghost" id="newHireBtn" type="button">+ New Hire</button>
-      <button class="danger" id="removeHireBtn" type="button">Remove This Hire</button>
+  <div id="authGate">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="sub" style="margin-bottom: 14px;">Same account as the mobile site. Ask an Admin or Director if you don't have one yet.</p>
+      <form id="authForm">
+        <label class="fl">Email</label>
+        <input type="email" id="authEmail" autocomplete="username" required>
+        <label class="fl">Password</label>
+        <input type="password" id="authPassword" autocomplete="current-password" required>
+        <div id="authError"></div>
+        <button class="primary" type="submit" style="width:100%; margin-top:14px;">Sign in</button>
+      </form>
     </div>
   </div>
 
-  <div id="hireArea"></div>
+  <div id="appArea">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button class="ghost" id="signOutBtn" type="button">Sign out</button>
+    </div>
+
+    <div class="card">
+      <div class="hirebar">
+        <select id="hireSelect"></select>
+        <button class="ghost" id="newHireBtn" type="button">+ New Hire</button>
+        <button class="danger" id="removeHireBtn" type="button">Remove This Hire</button>
+      </div>
+    </div>
+
+    <div id="hireArea"></div>
+  </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
+/* Same Firebase project as the mobile site's login (see
+ * web/firebase-config.js / web/auth.js) -- this is not a secret, see
+ * that file's comment for why. Each hire's record lives in the
+ * "onboarding_hires" Firestore collection, synced live to everyone
+ * signed in via onSnapshot, replacing the old single-device
+ * localStorage version. */
+firebase.initializeApp({
+  apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
+  authDomain: "the-center-office-app.firebaseapp.com",
+  projectId: "the-center-office-app",
+  storageBucket: "the-center-office-app.firebasestorage.app",
+  messagingSenderId: "282726386673",
+  appId: "1:282726386673:web:bdd0c91062a7ac2d0b9250",
+  measurementId: "G-GFVPF8N6ZF",
+});
+const auth = firebase.auth();
+const db = firebase.firestore();
+
 // Directors / admin contacts (from the Key Contacts page) who get onboarding-progress emails.
 const DIRECTORS = [
   { name: "Jeff Wike", role: "Executive Director", email: "jeff@thecentercc.com" },
@@ -114,16 +166,9 @@ const CHECKLIST = [
   ]},
 ];
 
-const STORAGE_KEY = "center_onboarding_tracker_v1";
-
-function load() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
-  catch { return {}; }
-}
-function save(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-
-let data = load(); // { hireId: { name, startDate, checked: {itemId: bool}, custom: [{id,text}] } }
-let currentId = Object.keys(data)[0] || null;
+let data = {}; // { hireId: { name, startDate, checked: {itemId: bool}, custom: [{id,text}] } }
+let currentId = null;
+let unsubscribe = null;
 
 function allItemIds(hire) {
   const ids = [];
@@ -137,6 +182,59 @@ function progress(hire) {
   const checked = ids.filter(id => hire.checked && hire.checked[id]).length;
   return { checked, total: ids.length, pct: ids.length ? Math.round(100 * checked / ids.length) : 0 };
 }
+
+// ---------------------------------------------------------------- auth --
+
+document.getElementById("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const errEl = document.getElementById("authError");
+  errEl.textContent = "";
+  auth.signInWithEmailAndPassword(email, password).catch(err => {
+    errEl.textContent = err && err.message ? err.message : "Couldn't sign in.";
+  });
+});
+
+document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
+
+auth.onAuthStateChanged(user => {
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  if (!user) {
+    document.getElementById("authGate").style.display = "block";
+    document.getElementById("appArea").style.display = "none";
+    return;
+  }
+  const key = user.email.trim().toLowerCase();
+  db.collection("users").doc(key).get().then(snap => {
+    if (!snap.exists) {
+      document.getElementById("authGate").style.display = "block";
+      document.getElementById("appArea").style.display = "none";
+      document.getElementById("authError").textContent =
+        "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
+      return;
+    }
+    document.getElementById("whoami").textContent = "Signed in as " + ((snap.data() || {}).name || user.email);
+    document.getElementById("authGate").style.display = "none";
+    document.getElementById("appArea").style.display = "block";
+    listen();
+  });
+});
+
+function listen() {
+  unsubscribe = db.collection("onboarding_hires").onSnapshot(snap => {
+    data = {};
+    snap.forEach(d => { data[d.id] = d.data(); });
+    if (!currentId || !data[currentId]) currentId = Object.keys(data)[0] || null;
+    renderHireSelect();
+    renderHireArea();
+  }, err => {
+    document.getElementById("hireArea").innerHTML =
+      '<div class="empty">Couldn\'t load shared hires: ' + err.message + '</div>';
+  });
+}
+
+// ---------------------------------------------------------------- CRUD --
 
 function renderHireSelect() {
   const sel = document.getElementById("hireSelect");
@@ -161,21 +259,18 @@ function newHire() {
   const name = prompt("New hire's name:");
   if (!name) return;
   const id = "h" + Date.now();
-  data[id] = { name, startDate: "", checked: {}, custom: [] };
-  currentId = id;
-  save(data);
-  renderHireSelect();
-  renderHireArea();
+  db.collection("onboarding_hires").doc(id).set({ name, startDate: "", checked: {}, custom: [] })
+    .then(() => { currentId = id; });
 }
 
 function removeHire() {
   if (!currentId) return;
   if (!confirm("Remove " + (data[currentId].name || "this hire") + "'s onboarding record? This can't be undone.")) return;
-  delete data[currentId];
-  currentId = Object.keys(data)[0] || null;
-  save(data);
-  renderHireSelect();
-  renderHireArea();
+  db.collection("onboarding_hires").doc(currentId).delete().then(() => { currentId = null; });
+}
+
+function updateHire(id, partial) {
+  db.collection("onboarding_hires").doc(id).set(partial, { merge: true });
 }
 
 function mailtoLink(subject, body) {
@@ -199,6 +294,8 @@ function buildUpdateBody(hire) {
   }
   return body;
 }
+
+// ---------------------------------------------------------------- render --
 
 function renderHireArea() {
   const area = document.getElementById("hireArea");
@@ -226,7 +323,7 @@ function renderHireArea() {
   area.appendChild(card);
 
   card.querySelector("#startDate").addEventListener("change", e => {
-    hire.startDate = e.target.value; save(data);
+    updateHire(currentId, { startDate: e.target.value });
   });
 
   CHECKLIST.forEach(g => {
@@ -243,10 +340,9 @@ function renderHireArea() {
     sec.innerHTML = inner;
     sec.querySelectorAll('input[type=checkbox]').forEach(cb => {
       cb.addEventListener("change", () => {
-        hire.checked = hire.checked || {};
-        hire.checked[cb.dataset.id] = cb.checked;
-        save(data);
-        renderHireArea();
+        const checked = Object.assign({}, hire.checked || {});
+        checked[cb.dataset.id] = cb.checked;
+        updateHire(currentId, { checked });
       });
     });
     area.appendChild(sec);
@@ -267,19 +363,16 @@ function renderHireArea() {
   customSec.innerHTML = customHtml;
   customSec.querySelectorAll('input[type=checkbox]').forEach(cb => {
     cb.addEventListener("change", () => {
-      hire.checked = hire.checked || {};
-      hire.checked[cb.dataset.id] = cb.checked;
-      save(data);
-      renderHireArea();
+      const checked = Object.assign({}, hire.checked || {});
+      checked[cb.dataset.id] = cb.checked;
+      updateHire(currentId, { checked });
     });
   });
   customSec.querySelector("#addCustomBtn").addEventListener("click", () => {
     const val = customSec.querySelector("#customInput").value.trim();
     if (!val) return;
-    hire.custom = hire.custom || [];
-    hire.custom.push({ id: "c" + Date.now(), text: val });
-    save(data);
-    renderHireArea();
+    const custom = (hire.custom || []).concat([{ id: "c" + Date.now(), text: val }]);
+    updateHire(currentId, { custom });
   });
   area.appendChild(customSec);
 
@@ -299,9 +392,6 @@ function renderHireArea() {
 document.getElementById("hireSelect").addEventListener("change", e => { currentId = e.target.value; renderHireArea(); });
 document.getElementById("newHireBtn").addEventListener("click", newHire);
 document.getElementById("removeHireBtn").addEventListener("click", removeHire);
-
-renderHireSelect();
-renderHireArea();
 </script>
 </body>
 </html>

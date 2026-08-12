@@ -53,5 +53,19 @@ service cloud.firestore {
         request.resource.data.name == resource.data.name
       );
     }
+
+    // Shared data for the interactive tools (Building Maintenance Log,
+    // New Hire Onboarding Tracker -- see those files' own <script>
+    // blocks). Same flat permission model the old single-device
+    // localStorage versions had: any signed-in person with a real
+    // profile can read, add, edit, or delete -- no extra role gate,
+    // since these are everyday operational tools, not admin features.
+    match /maintenance_log/{entryId} {
+      allow read, write: if isSignedIn() && hasProfile();
+    }
+
+    match /onboarding_hires/{hireId} {
+      allow read, write: if isSignedIn() && hasProfile();
+    }
   }
 }

@@ -26,7 +26,7 @@
   @media (max-width: 700px) { .formgrid { grid-template-columns: 1fr; } }
   .formgrid .full { grid-column: 1 / -1; }
   label.fl { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
-  select, input[type=text], input[type=date], textarea {
+  select, input[type=text], input[type=date], input[type=email], input[type=password], textarea {
     font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
     outline: none; width: 100%; background: #fff;
   }
@@ -34,6 +34,7 @@
   select:focus, input:focus, textarea:focus { border-color: var(--blue); }
   button { font: inherit; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
   .primary { background: var(--blue); color: #fff; }
+  .primary:disabled { background: #b9c4dd; cursor: not-allowed; }
   .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
   .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -58,96 +59,186 @@
   .tag.med { background: var(--amber-bg); color: var(--amber); }
   .tag.high, .tag.urgent { background: var(--red-bg); color: var(--red); }
   select.statusSelect { font-size: 12.5px; padding: 5px 8px; }
-  .thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; cursor: pointer; }
   .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+
+  .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+  .topbar button { padding: 5px 10px; font-size: 12.5px; }
+
+  #authGate { max-width: 360px; margin: 60px auto; }
+  #authGate .card { text-align: center; }
+  #authGate label { text-align: left; display: block; margin-top: 10px; }
+  #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
+  #appArea { display: none; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Building Maintenance Log</h1>
-  <p class="sub">Log a facility issue, track its status, and export the list any time — one place instead of scattered notes docs.</p>
+  <p class="sub">Log a facility issue, track its status, and export the list any time — shared live across everyone signed in, on any device.</p>
 
-  <div class="card">
-    <h2>Log a New Issue</h2>
-    <div class="formgrid">
-      <div>
-        <label class="fl">Location</label>
-        <select id="location">
-          <option>Columbia City — Main Building</option>
-          <option>Columbia City — Parsonage</option>
-          <option>South Whitley Site</option>
-          <option>Churubusco Site</option>
-          <option>Whitko Site</option>
-          <option>Other</option>
-        </select>
-      </div>
-      <div>
-        <label class="fl">Priority</label>
-        <select id="priority">
-          <option value="Low">Low</option>
-          <option value="Med" selected>Medium</option>
-          <option value="High">High</option>
-          <option value="Urgent">Urgent</option>
-        </select>
-      </div>
-      <div>
-        <label class="fl">Reported By</label>
-        <input type="text" id="reporter" placeholder="Your name">
-      </div>
-      <div>
-        <label class="fl">Date</label>
-        <input type="date" id="dateReported">
-      </div>
-      <div class="full">
-        <label class="fl">Description</label>
-        <textarea id="description" placeholder="What's the issue? Where exactly? Any safety concern?"></textarea>
-      </div>
-      <div class="full">
-        <label class="fl">Photo (optional)</label>
-        <input type="file" id="photo" accept="image/*">
-      </div>
-    </div>
-    <div class="row" style="margin-top: 14px;">
-      <button class="primary" id="addBtn" type="button">Add Issue</button>
-      <span id="formMsg" style="font-size:13px; color:var(--muted);"></span>
+  <div id="authGate">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="sub" style="margin-bottom: 14px;">Same account as the mobile site. Ask an Admin or Director if you don't have one yet.</p>
+      <form id="authForm">
+        <label class="fl">Email</label>
+        <input type="email" id="authEmail" autocomplete="username" required>
+        <label class="fl">Password</label>
+        <input type="password" id="authPassword" autocomplete="current-password" required>
+        <div id="authError"></div>
+        <button class="primary" type="submit" style="width:100%; margin-top:14px;">Sign in</button>
+      </form>
     </div>
   </div>
 
-  <div class="stats" id="stats"></div>
+  <div id="appArea">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button class="ghost" id="signOutBtn" type="button">Sign out</button>
+    </div>
 
-  <div class="filters" id="filters"></div>
+    <div class="card">
+      <h2>Log a New Issue</h2>
+      <div class="formgrid">
+        <div>
+          <label class="fl">Location</label>
+          <select id="location">
+            <option>Columbia City — Main Building</option>
+            <option>Columbia City — Parsonage</option>
+            <option>South Whitley Site</option>
+            <option>Churubusco Site</option>
+            <option>Whitko Site</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div>
+          <label class="fl">Priority</label>
+          <select id="priority">
+            <option value="Low">Low</option>
+            <option value="Med" selected>Medium</option>
+            <option value="High">High</option>
+            <option value="Urgent">Urgent</option>
+          </select>
+        </div>
+        <div>
+          <label class="fl">Reported By</label>
+          <input type="text" id="reporter" placeholder="Your name">
+        </div>
+        <div>
+          <label class="fl">Date</label>
+          <input type="date" id="dateReported">
+        </div>
+        <div class="full">
+          <label class="fl">Description</label>
+          <textarea id="description" placeholder="What's the issue? Where exactly? Any safety concern?"></textarea>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 14px;">
+        <button class="primary" id="addBtn" type="button">Add Issue</button>
+        <span id="formMsg" style="font-size:13px; color:var(--muted);"></span>
+      </div>
+    </div>
 
-  <div class="row" style="margin-bottom: 14px; justify-content: flex-end;">
-    <button class="ghost" id="exportBtn" type="button">Export CSV</button>
+    <div class="stats" id="stats"></div>
+
+    <div class="filters" id="filters"></div>
+
+    <div class="row" style="margin-bottom: 14px; justify-content: flex-end;">
+      <button class="ghost" id="exportBtn" type="button">Export CSV</button>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Location</th><th>Description</th><th>Priority</th><th>Reported By</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div id="emptyState"></div>
+    <p class="sub" style="margin-top:14px;">Photo attachments aren't supported in the shared log yet — email a photo separately if one's needed.</p>
   </div>
-
-  <div class="tablewrap">
-    <table>
-      <thead>
-        <tr><th>Date</th><th>Location</th><th>Description</th><th>Priority</th><th>Reported By</th><th>Photo</th><th>Status</th><th></th></tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
-  </div>
-  <div id="emptyState"></div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
-const STORAGE_KEY = "center_maintenance_log_v1";
-function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; } }
-function save(items) { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }
+/* Same Firebase project as the mobile site's login (see
+ * web/firebase-config.js / web/auth.js) -- this is not a secret, see
+ * that file's comment for why. Entries live in the "maintenance_log"
+ * Firestore collection, synced live to everyone signed in via
+ * onSnapshot, replacing the old single-device localStorage version. */
+firebase.initializeApp({
+  apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
+  authDomain: "the-center-office-app.firebaseapp.com",
+  projectId: "the-center-office-app",
+  storageBucket: "the-center-office-app.firebasestorage.app",
+  messagingSenderId: "282726386673",
+  appId: "1:282726386673:web:bdd0c91062a7ac2d0b9250",
+  measurementId: "G-GFVPF8N6ZF",
+});
+const auth = firebase.auth();
+const db = firebase.firestore();
 
-let items = load();
+let items = [];
 let statusFilter = "All";
+let unsubscribe = null;
+let currentUserName = "";
 
 function priorityRank(p) { return { Urgent: 0, High: 1, Med: 2, Low: 3 }[p] ?? 4; }
 function tagClass(p) { return { Urgent: "urgent", High: "high", Med: "med", Low: "low" }[p] || "low"; }
 
-function readFileAsDataURL(file, cb) {
-  const reader = new FileReader();
-  reader.onload = () => cb(reader.result);
-  reader.readAsDataURL(file);
+// ---------------------------------------------------------------- auth --
+
+document.getElementById("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const errEl = document.getElementById("authError");
+  errEl.textContent = "";
+  auth.signInWithEmailAndPassword(email, password).catch(err => {
+    errEl.textContent = err && err.message ? err.message : "Couldn't sign in.";
+  });
+});
+
+document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
+
+auth.onAuthStateChanged(user => {
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  if (!user) {
+    document.getElementById("authGate").style.display = "block";
+    document.getElementById("appArea").style.display = "none";
+    return;
+  }
+  const key = user.email.trim().toLowerCase();
+  db.collection("users").doc(key).get().then(snap => {
+    if (!snap.exists) {
+      document.getElementById("authGate").style.display = "block";
+      document.getElementById("appArea").style.display = "none";
+      document.getElementById("authError").textContent =
+        "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
+      return;
+    }
+    currentUserName = (snap.data() || {}).name || user.email;
+    document.getElementById("whoami").textContent = "Signed in as " + currentUserName;
+    document.getElementById("reporter").value = currentUserName;
+    document.getElementById("authGate").style.display = "none";
+    document.getElementById("appArea").style.display = "block";
+    listen();
+  });
+});
+
+function listen() {
+  unsubscribe = db.collection("maintenance_log").onSnapshot(snap => {
+    items = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    render();
+  }, err => {
+    document.getElementById("formMsg").textContent = "Couldn't load the shared log: " + err.message;
+  });
 }
+
+// ---------------------------------------------------------------- CRUD --
 
 document.getElementById("addBtn").addEventListener("click", () => {
   const location = document.getElementById("location").value;
@@ -155,38 +246,25 @@ document.getElementById("addBtn").addEventListener("click", () => {
   const reporter = document.getElementById("reporter").value.trim();
   const dateReported = document.getElementById("dateReported").value || new Date().toISOString().slice(0, 10);
   const description = document.getElementById("description").value.trim();
-  const photoInput = document.getElementById("photo");
   const msg = document.getElementById("formMsg");
 
   if (!description) { msg.textContent = "Add a description first."; msg.style.color = "var(--red)"; return; }
 
-  const entry = { id: "m" + Date.now(), location, priority, reporter, dateReported, description, status: "Open", photo: null };
-
-  const finish = () => {
-    items.unshift(entry);
-    save(items);
+  const id = "m" + Date.now();
+  db.collection("maintenance_log").doc(id).set({
+    location, priority, reporter, dateReported, description, status: "Open",
+  }).then(() => {
     document.getElementById("description").value = "";
-    document.getElementById("reporter").value = "";
-    photoInput.value = "";
     msg.textContent = "Added.";
     msg.style.color = "var(--green)";
-    render();
     setTimeout(() => { msg.textContent = ""; }, 2500);
-  };
-
-  if (photoInput.files && photoInput.files[0]) {
-    const file = photoInput.files[0];
-    if (file.size > 1_500_000) {
-      msg.textContent = "That photo is large — logged without it (email it separately if needed).";
-      msg.style.color = "var(--amber)";
-      finish();
-      return;
-    }
-    readFileAsDataURL(file, dataUrl => { entry.photo = dataUrl; finish(); });
-  } else {
-    finish();
-  }
+  }).catch(err => {
+    msg.textContent = "Couldn't save: " + err.message;
+    msg.style.color = "var(--red)";
+  });
 });
+
+// ---------------------------------------------------------------- render --
 
 function renderStats() {
   const stats = document.getElementById("stats");
@@ -233,7 +311,6 @@ function render() {
       <td class="desc">${item.description}</td>
       <td><span class="tag ${tagClass(item.priority)}">${item.priority}</span></td>
       <td>${item.reporter || "—"}</td>
-      <td>${item.photo ? `<img class="thumb" src="${item.photo}" title="Click to view full size">` : "—"}</td>
       <td>
         <select class="statusSelect" data-id="${item.id}">
           <option ${item.status === "Open" ? "selected" : ""}>Open</option>
@@ -248,20 +325,14 @@ function render() {
 
   tbody.querySelectorAll(".statusSelect").forEach(sel => {
     sel.addEventListener("change", () => {
-      const item = items.find(i => i.id === sel.dataset.id);
-      if (item) { item.status = sel.value; save(items); render(); }
+      db.collection("maintenance_log").doc(sel.dataset.id).update({ status: sel.value });
     });
   });
   tbody.querySelectorAll("[data-remove]").forEach(btn => {
     btn.addEventListener("click", () => {
       if (!confirm("Delete this entry?")) return;
-      items = items.filter(i => i.id !== btn.dataset.remove);
-      save(items);
-      render();
+      db.collection("maintenance_log").doc(btn.dataset.remove).delete();
     });
-  });
-  tbody.querySelectorAll(".thumb").forEach(img => {
-    img.addEventListener("click", () => { window.open(img.src, "_blank"); });
   });
 }
 
@@ -275,8 +346,6 @@ document.getElementById("exportBtn").addEventListener("click", () => {
   a.download = "building-maintenance-log.csv";
   a.click();
 });
-
-render();
 </script>
 </body>
 </html>

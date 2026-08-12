@@ -170,6 +170,38 @@ work beyond step 1):
 There's no self-service sign-up anywhere in the app on purpose — both
 steps above are deliberately manual and Admin/Director-only.
 
+## Shared data in the interactive tools
+
+Two of the interactive tools now save to the same Firebase project as
+login, instead of each device's own browser storage:
+
+- **Building Maintenance Log** → `maintenance_log` collection
+- **New Hire Onboarding Tracker** → `onboarding_hires` collection
+
+Any signed-in person with a profile can read, add, edit, or delete in
+either one — same flat permissions the old single-device versions had,
+just shared live across everyone now instead of stuck on one browser.
+See `firestore.rules` for the exact rule (unchanged from the login
+rules otherwise; just two new collections added at the bottom).
+
+**Photos aren't synced.** The Maintenance Log's photo field was removed
+rather than half-supported — Firestore documents cap out around 1 MB,
+and a synced-photo feature really wants Firebase Storage instead, which
+(as of this writing) requires linking a billing account to enable, even
+though usage would stay within the free allowance. Since staying
+entirely card-free was the point, photos are left out for now; email
+one separately if a maintenance issue needs one.
+
+**Desktop has a second login now.** These two tools open in their own
+pywebview window with no connection to the desktop app's own
+`users.json` login — they're plain webpages that happen to run inside
+the launcher, so they get their own small Firebase sign-in screen, same
+account as the mobile site. That means on desktop, staff now sign in
+twice with two different credential sets: once into the launcher itself
+(`users.json`), and again the first time they open one of these two
+tools (Firebase). Not ideal, but unifying those is a bigger project for
+another day — flagging it here so it isn't a surprise.
+
 ## Adding or replacing the logo
 
 The sidebar header and welcome screen show the real Center logo from
