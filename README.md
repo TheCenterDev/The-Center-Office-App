@@ -103,6 +103,34 @@ No code changes needed:
 
 To remove a document, delete its file from `html/`.
 
+## Mobile / web access
+
+There's also a phone-friendly web version of this same content — install
+it to an iPhone or Android home screen and it opens full-screen like a
+real app, no App Store or Play Store needed.
+
+- Source lives in `web/` (the site shell) and `scripts/build_site.py`
+  (which mirrors `html/` alongside it and generates the sidebar list).
+- **One-time setup**: in this repo's **Settings → Pages**, set **Source**
+  to **GitHub Actions**. After that, every push to `main` that touches
+  `html/`, `web/`, or the logo automatically rebuilds and republishes the
+  site via the "Build and deploy mobile site" workflow
+  (`.github/workflows/pages.yml`) — usually live within a couple of
+  minutes of the push.
+- Once Pages is turned on, the site is reachable at
+  `https://thecenterdev.github.io/The-Center-Office-App/` (GitHub shows
+  the exact URL under Settings → Pages once it's enabled).
+- To install it: open that URL on a phone, then use the browser's
+  **Add to Home Screen** option (Safari: Share → Add to Home Screen;
+  Chrome on Android: menu → Add to Home screen / Install app).
+- Editing documents works exactly the same as above — the mobile site
+  reads the same `html/` files, so there's nothing extra to maintain.
+- Heads up: this makes the guide/contact content (names, emails, notes
+  in `html/`) reachable by anyone with the link, since it isn't gated by
+  a login yet — the same way the compiled desktop app is already
+  publicly downloadable from Releases. A login/role-gated version is a
+  bigger follow-up project, not part of this phase.
+
 ## Adding or replacing the logo
 
 The sidebar header and welcome screen show the real Center logo from

@@ -1,0 +1,62 @@
+name: Build and deploy mobile site
+
+# Rebuilds the mobile/web version of the office tools (see web/ and
+# scripts/build_site.py) and publishes it to GitHub Pages every time
+# html/ content, the web/ shell, or the logo changes on main. This is
+# what makes the mobile site "storage through the GitHub repo" -- edit
+# and push a guide, and the phone-facing site picks it up automatically
+# within a couple of minutes, no manual redeploy needed.
+#
+# One-time setup required (can't be done from a workflow file): in the
+# repo's Settings -> Pages, set Source to "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "html/**"
+      - "web/**"
+      - "assets/logo.png"
+      - "scripts/build_site.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build site
+        run: python3 scripts/build_site.py
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

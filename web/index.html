@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Center — Office Tools</title>
+<meta name="description" content="Office guides, contacts, and tools for The Center for Whitley County Youth.">
+<meta name="theme-color" content="#1D2071">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Center Tools">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="app">
+  <div id="sidebar-scrim"></div>
+
+  <nav id="sidebar" aria-label="Guides navigation">
+    <div id="sidebar-header">
+      <img src="./icons/icon-192.png" alt="The Center logo">
+      <div class="wordmark">The Center</div>
+      <div class="tagline">Office Tools</div>
+    </div>
+    <div id="search-box">
+      <input id="search-input" type="search" placeholder="Search guides…" aria-label="Search guides">
+    </div>
+    <div id="nav-list" role="list"></div>
+    <div id="sidebar-footer">Updates automatically from the office GitHub repo</div>
+  </nav>
+
+  <div id="content-wrap">
+    <div id="topbar">
+      <button id="hamburger" aria-label="Open menu">&#9776;</button>
+      <div id="topbar-title">The Center</div>
+    </div>
+    <div id="content-scroll">
+      <div id="loading" style="display:none;">Loading…</div>
+      <div id="empty-state" style="display:none;">Nothing to show yet.</div>
+      <iframe id="content-frame" title="Document viewer" style="display:none;"></iframe>
+    </div>
+  </div>
+</div>
+
+<script src="./app.js"></script>
+</body>
+</html>
