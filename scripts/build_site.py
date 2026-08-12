@@ -43,6 +43,47 @@ WHITESPACE_RE = re.compile(r"\s+")
 SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 SEARCH_TEXT_MAX_CHARS = 4000
 
+# The guide/tool HTML in html/ was authored for two audiences that never
+# used to overlap: the desktop app's own native block renderer (which
+# only cares about the semantic content, not the CSS) and, for the
+# interactive tools, a full-size desktop browser window via pywebview.
+# Nothing in there was ever meant to be read on a 390px-wide phone --
+# fixed pixel-width tables (the Contacts table alone wants ~700px) and
+# hardcoded desktop font stacks look badly broken in a narrow viewport.
+# This lightly adapts each mirrored copy for phone browsers: a viewport
+# meta tag, a small containment stylesheet, and wrapping any <table> in
+# a horizontally-scrollable container so a too-wide table scrolls
+# instead of overflowing or forcing the whole page to zoom out. It only
+# touches presentation, never the actual markup/content, and only in
+# the mobile mirror under _site/html/ -- the original files in html/
+# (and what the desktop app reads) are completely untouched.
+MOBILE_VIEWPORT_META = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+MOBILE_OVERRIDE_CSS = """<style>
+  html, body { max-width: 100%; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+  body { margin: 0; padding: 20px 16px 40px; box-sizing: border-box; }
+  img, svg { max-width: 100%; height: auto; }
+  .mobile-table-scroll { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; margin: 12px 0; }
+  .mobile-table-scroll table { margin: 0; }
+</style>"""
+
+HEAD_CLOSE_RE = re.compile(r"</head>", re.IGNORECASE)
+VIEWPORT_META_RE = re.compile(r'<meta[^>]+name=["\']viewport["\']', re.IGNORECASE)
+TABLE_RE = re.compile(r"(<table\b.*?</table>)", re.IGNORECASE | re.DOTALL)
+
+
+def make_mobile_friendly(text: str) -> str:
+    if not VIEWPORT_META_RE.search(text):
+        injected_head = MOBILE_VIEWPORT_META + "\n" + MOBILE_OVERRIDE_CSS + "\n</head>"
+        if HEAD_CLOSE_RE.search(text):
+            text = HEAD_CLOSE_RE.sub(injected_head, text, count=1)
+        else:
+            text = injected_head + text
+
+    def wrap_table(match: "re.Match[str]") -> str:
+        return '<div class="mobile-table-scroll">' + match.group(1) + "</div>"
+
+    return TABLE_RE.sub(wrap_table, text)
+
 
 def display_name_from_filename(filename: str) -> str:
     name = Path(filename).stem
@@ -130,7 +171,8 @@ def main() -> int:
     copied = 0
     for path in HTML_DIR.glob("*.htm*"):
         if path.is_file():
-            shutil.copy2(path, out_html_dir / path.name)
+            raw = path.read_text(encoding="utf-8", errors="ignore")
+            (out_html_dir / path.name).write_text(make_mobile_friendly(raw), encoding="utf-8")
             copied += 1
 
     index = build_guides_index()
