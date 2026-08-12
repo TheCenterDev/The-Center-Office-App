@@ -123,6 +123,22 @@
       return auth.sendPasswordResetEmail(String(email).trim());
     },
 
+    /** Lets the signed-in person change their own password from inside
+     * the app (Settings -> Security), instead of only via the "Forgot
+     * password?" email link on the sign-in screen. Firebase requires a
+     * fresh sign-in before a security-sensitive change like this, so it
+     * re-checks the current password first (reauthenticateWithCredential)
+     * before applying the new one -- this also doubles as confirming
+     * they know their current password. */
+    changePassword: function (currentPassword, newPassword) {
+      if (!current || !current.user) return Promise.reject(new Error("Not signed in"));
+      var user = current.user;
+      var cred = firebase.auth.EmailAuthProvider.credential(user.email, currentPassword);
+      return user.reauthenticateWithCredential(cred).then(function () {
+        return user.updatePassword(newPassword);
+      });
+    },
+
     isAdminOrDirector: isAdminOrDirector,
 
     /** Merge a partial preferences object into the signed-in user's own

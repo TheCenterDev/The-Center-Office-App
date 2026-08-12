@@ -420,6 +420,79 @@
     ));
     els.settingsView.appendChild(appearance);
 
+    var security = section("Security");
+    var currentPwInput = document.createElement("input");
+    currentPwInput.type = "password";
+    currentPwInput.placeholder = "Current password";
+    currentPwInput.autocomplete = "current-password";
+    currentPwInput.style.width = "100%";
+    currentPwInput.style.marginBottom = "8px";
+
+    var newPwInput = document.createElement("input");
+    newPwInput.type = "password";
+    newPwInput.placeholder = "New password (at least 6 characters)";
+    newPwInput.autocomplete = "new-password";
+    newPwInput.style.width = "100%";
+    newPwInput.style.marginBottom = "8px";
+
+    var confirmPwInput = document.createElement("input");
+    confirmPwInput.type = "password";
+    confirmPwInput.placeholder = "Confirm new password";
+    confirmPwInput.autocomplete = "new-password";
+    confirmPwInput.style.width = "100%";
+    confirmPwInput.style.marginBottom = "12px";
+
+    [currentPwInput, newPwInput, confirmPwInput].forEach(function (el) { security.appendChild(el); });
+
+    var pwStatus = document.createElement("p");
+    pwStatus.className = "login-help";
+    pwStatus.style.margin = "0 0 8px";
+    security.appendChild(pwStatus);
+
+    var changePwBtn = document.createElement("button");
+    changePwBtn.type = "button";
+    changePwBtn.className = "btn btn-primary";
+    changePwBtn.style.width = "100%";
+    changePwBtn.textContent = "Change password";
+    changePwBtn.addEventListener("click", function () {
+      var currentPw = currentPwInput.value;
+      var newPw = newPwInput.value;
+      var confirmPw = confirmPwInput.value;
+      pwStatus.textContent = "";
+
+      if (!currentPw || !newPw || !confirmPw) {
+        pwStatus.textContent = "Fill in all three fields.";
+        return;
+      }
+      if (newPw.length < 6) {
+        pwStatus.textContent = "New password needs to be at least 6 characters.";
+        return;
+      }
+      if (newPw !== confirmPw) {
+        pwStatus.textContent = "New password and confirmation don't match.";
+        return;
+      }
+
+      changePwBtn.disabled = true;
+      changePwBtn.textContent = "Changing…";
+      window.CenterAuth.changePassword(currentPw, newPw)
+        .then(function () {
+          pwStatus.textContent = "Password changed.";
+          currentPwInput.value = "";
+          newPwInput.value = "";
+          confirmPwInput.value = "";
+        })
+        .catch(function (err) {
+          pwStatus.textContent = friendlyAuthError(err);
+        })
+        .then(function () {
+          changePwBtn.disabled = false;
+          changePwBtn.textContent = "Change password";
+        });
+    });
+    security.appendChild(changePwBtn);
+    els.settingsView.appendChild(security);
+
     var account2 = section("");
     var signOutBtn = document.createElement("button");
     signOutBtn.type = "button";
