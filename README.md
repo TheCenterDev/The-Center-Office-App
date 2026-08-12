@@ -170,6 +170,45 @@ work beyond step 1):
 There's no self-service sign-up anywhere in the app on purpose — both
 steps above are deliberately manual and Admin/Director-only.
 
+## Bulk-creating logins (script)
+
+Doing the two steps above one person at a time is fine for a single new
+hire, but tedious for a whole staff list. `scripts/create_logins.js`
+does both steps for everyone in `scripts/staff-list.json` in one go —
+safe to re-run any time (it skips anyone who already has a login).
+
+Everyone it creates gets the `staff` role by default; promote anyone
+who needs Admin or Director access afterward from **Settings → Team**.
+
+**One-time setup:**
+
+1. Firebase console → gear icon (top left, next to "Project Overview")
+   → **Project settings** → **Service accounts** tab → **Generate new
+   private key** → **Generate key**. This downloads a JSON file — it's
+   a master key to the whole project, so don't share it or post it
+   anywhere.
+2. Rename the downloaded file to `service-account.json` and put it in
+   this project's `scripts/` folder. (It's already excluded from Git,
+   so it can never accidentally get uploaded to GitHub.)
+3. Install [Node.js](https://nodejs.org) if it isn't already on your
+   computer, then in Terminal, `cd` into this project folder and run
+   once: `npm install firebase-admin`
+
+**To create the logins:**
+
+1. Open `scripts/staff-list.json` and check the name/email list is
+   current — add a `{ "name": "...", "email": "..." }` entry for anyone
+   new, or remove someone who's left.
+2. In Terminal, from this project folder, run: `node scripts/create_logins.js`
+3. It prints what it did, and writes a `scripts/login-links-<date>.txt`
+   file with one personal "set your password" link per new person.
+   Send each person their own link (text or email) — they click it,
+   choose a password, and can then sign into the mobile site with their
+   email and that password.
+
+You can delete `scripts/service-account.json` when done, or leave it —
+just never commit it. Generate a fresh one from the console any time.
+
 ## Shared data in the interactive tools
 
 Two of the interactive tools now save to the same Firebase project as

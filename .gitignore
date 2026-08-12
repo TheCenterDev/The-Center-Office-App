@@ -28,3 +28,18 @@ users.json
 settings.json
 error_log.txt
 shared_preferences.json
+
+# Firebase Admin SDK service account key (scripts/create_logins.js) --
+# this is a master key with full admin access to the Firebase project.
+# Never commit it. Download it fresh from the Firebase console each time
+# you need it (Project settings -> Service accounts -> Generate new
+# private key) and delete the file again when you're done.
+scripts/service-account.json
+
+# Node dependencies for scripts/create_logins.js.
+node_modules/
+
+# Personal sign-in links generated for new staff -- these let whoever
+# has the link set an account password, so they're as sensitive as a
+# temporary password and shouldn't be committed either.
+scripts/login-links-*.txt
