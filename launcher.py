@@ -3100,6 +3100,95 @@ class LauncherApp:
             lambda v: apply_and_rebuild("remember_username", v),
         )
 
+        if self.current_user is not None:
+            # Self-service password change, available to every real
+            # named account regardless of role — Staff included, not
+            # just Admin/Director. Previously the only way to change a
+            # password was Admin/Director doing it for you from the Team
+            # page; this lets anyone handle their own. Deliberately not
+            # shown for the emergency shared Staff/Admin/Director logins
+            # (self.current_user is None for those) — those shared
+            # passwords are only touched via "Reset to Defaults" or by
+            # editing settings.json directly.
+            section(
+                "Password",
+                "Change your own sign-in password. This is separate from the "
+                "shared Staff/Admin/Director logins.",
+            )
+            pw_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
+            pw_card.pack(fill="x", pady=(6, 0))
+            pw_inner = ctk.CTkFrame(pw_card, fg_color=CARD_BG)
+            pw_inner.pack(fill="x", padx=18, pady=16)
+
+            pw_row = ctk.CTkFrame(pw_inner, fg_color=CARD_BG)
+            pw_row.pack(fill="x")
+
+            current_pw_var = StringVar()
+            new_pw_var = StringVar()
+            confirm_pw_var = StringVar()
+            pw_status_var = StringVar()
+
+            def pw_field(label_text, var, placeholder):
+                group = ctk.CTkFrame(pw_row, fg_color=CARD_BG)
+                group.pack(side="left", padx=(0, 10))
+                ctk.CTkLabel(
+                    group, text=label_text, font=F(10, "bold"), text_color=TEXT_MUTED,
+                    fg_color=CARD_BG, anchor="w",
+                ).pack(anchor="w", pady=(0, 3))
+                ctk.CTkEntry(
+                    group, textvariable=var, placeholder_text=placeholder, font=F(12),
+                    height=32, corner_radius=8, width=150, fg_color=BODY_BG,
+                    border_color=BORDER, text_color=TEXT_DARK, placeholder_text_color=TEXT_MUTED,
+                    show="•",
+                ).pack()
+
+            pw_field("Current Password", current_pw_var, "Current password")
+            pw_field("New Password", new_pw_var, "New password")
+            pw_field("Confirm New Password", confirm_pw_var, "Confirm new password")
+
+            pw_status_label = ctk.CTkLabel(
+                pw_inner, textvariable=pw_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=CARD_BG
+            )
+
+            def change_own_password():
+                current_pw = current_pw_var.get()
+                new_pw = new_pw_var.get()
+                confirm_pw = confirm_pw_var.get()
+                if self.current_user.get("password") != current_pw:
+                    pw_status_var.set("Current password is incorrect.")
+                    pw_status_label.configure(text_color="#c0392b")
+                elif not new_pw:
+                    pw_status_var.set("Enter a new password.")
+                    pw_status_label.configure(text_color="#c0392b")
+                elif new_pw != confirm_pw:
+                    pw_status_var.set("New password and confirmation don't match.")
+                    pw_status_label.configure(text_color="#c0392b")
+                else:
+                    # self.current_user is the very same dict object that
+                    # lives inside self.users (matched by reference at
+                    # login, see attempt_login) — updating it in place is
+                    # enough for save_users() to persist the change too.
+                    self.current_user["password"] = new_pw
+                    save_users(self.users)
+                    current_pw_var.set("")
+                    new_pw_var.set("")
+                    confirm_pw_var.set("")
+                    pw_status_var.set("Password changed.")
+                    pw_status_label.configure(text_color=TEXT_MUTED)
+
+            ctk.CTkButton(
+                pw_inner,
+                text="Change Password",
+                font=F(12, "bold"),
+                fg_color=ACCENT,
+                hover_color=TEXT_DARK,
+                text_color="white",
+                corner_radius=8,
+                height=32,
+                command=change_own_password,
+            ).pack(anchor="w", pady=(10, 4))
+            pw_status_label.pack(anchor="w")
+
         if self.true_role in ("admin", "director"):
             # Gated on true_role, not user_role -- this section has to
             # stay visible even after switching to a lower view, or
