@@ -120,11 +120,25 @@
       toggleSidebar(false);
       if (file === null) {
         window.location.hash = "";
+      } else if (isProgram) {
+        // Interactive tools navigate the whole page, synchronously,
+        // inside this same click handler -- not via the hashchange
+        // listener below. Browsers (especially on phones, and inside
+        // an installed standalone PWA) block window.open() unless it
+        // happens directly inside a user gesture; routing it through
+        // an async hashchange event lost that gesture, which is why
+        // these tools didn't open at all. A plain same-tab navigation
+        // has no such restriction and works the same installed or not.
+        openProgram(doc_for(file));
       } else {
         window.location.hash = "#/" + encodeURIComponent(file);
       }
     });
     return btn;
+  }
+
+  function doc_for(file) {
+    return state.docs.filter(function (d) { return d.file === file; })[0];
   }
 
   function routeFromHash() {
@@ -136,13 +150,12 @@
     var match = hash.match(/^#\/(.+)$/);
     if (!match) { showHome(); return; }
     var file = decodeURIComponent(match[1]);
-    var doc = state.docs.filter(function (d) { return d.file === file; })[0];
+    var doc = doc_for(file);
     if (!doc) { showHome(); return; }
     if (doc.isProgram) {
+      // Only reached via a direct/bookmarked link to a tool's hash --
+      // normal clicks never set this hash to begin with (see above).
       openProgram(doc);
-      // Don't leave the address bar pointed at a tool that opened
-      // elsewhere -- fall back to whatever was open before.
-      history.back();
     } else {
       showDoc(doc.file, doc.title);
     }
@@ -168,7 +181,14 @@
   }
 
   function openProgram(doc) {
-    window.open("./html/" + encodeURIComponent(doc.file), "_blank", "noopener");
+    // Same-tab navigation, not window.open(): a new tab/window has
+    // nowhere to go when the site is installed as a standalone
+    // home-screen app (there's no browser chrome to hold it), and even
+    // in a regular mobile browser tab, window.open() outside a direct
+    // synchronous user gesture is routinely popup-blocked. Each tool
+    // page gets a "Back to Center Tools" link injected at build time
+    // (see scripts/build_site.py) so there's still a way back.
+    window.location.href = "./html/" + encodeURIComponent(doc.file);
   }
 
   function loadIframe(file) {

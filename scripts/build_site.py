@@ -67,17 +67,39 @@ MOBILE_OVERRIDE_CSS = """<style>
 </style>"""
 
 HEAD_CLOSE_RE = re.compile(r"</head>", re.IGNORECASE)
+BODY_OPEN_RE = re.compile(r"<body\b[^>]*>", re.IGNORECASE)
 VIEWPORT_META_RE = re.compile(r'<meta[^>]+name=["\']viewport["\']', re.IGNORECASE)
 TABLE_RE = re.compile(r"(<table\b.*?</table>)", re.IGNORECASE | re.DOTALL)
 
+# Interactive tools (Building Maintenance Log, Credit Card Reconciliation,
+# etc.) now open via a plain same-tab navigation instead of window.open()
+# (see web/app.js for why -- window.open() gets popup-blocked when it's
+# not directly inside a user gesture, and has nowhere to go at all when
+# the site is installed as a standalone home-screen app). A same-tab
+# navigation needs an obvious way back, since these pages otherwise have
+# no link to the rest of the site.
+BACK_BANNER = (
+    '<div style="position:sticky;top:0;z-index:9999;background:#1D2071;'
+    'color:#fff;padding:10px 16px;font:600 14px -apple-system,'
+    'BlinkMacSystemFont,\'Segoe UI\',sans-serif;">'
+    '<a href="../index.html" style="color:#fff;text-decoration:none;">'
+    '← Back to Center Tools</a></div>'
+)
 
-def make_mobile_friendly(text: str) -> str:
+
+def make_mobile_friendly(text: str, is_program: bool = False) -> str:
     if not VIEWPORT_META_RE.search(text):
         injected_head = MOBILE_VIEWPORT_META + "\n" + MOBILE_OVERRIDE_CSS + "\n</head>"
         if HEAD_CLOSE_RE.search(text):
             text = HEAD_CLOSE_RE.sub(injected_head, text, count=1)
         else:
             text = injected_head + text
+
+    if is_program:
+        if BODY_OPEN_RE.search(text):
+            text = BODY_OPEN_RE.sub(lambda m: m.group(0) + BACK_BANNER, text, count=1)
+        else:
+            text = BACK_BANNER + text
 
     def wrap_table(match: "re.Match[str]") -> str:
         return '<div class="mobile-table-scroll">' + match.group(1) + "</div>"
@@ -172,7 +194,8 @@ def main() -> int:
     for path in HTML_DIR.glob("*.htm*"):
         if path.is_file():
             raw = path.read_text(encoding="utf-8", errors="ignore")
-            (out_html_dir / path.name).write_text(make_mobile_friendly(raw), encoding="utf-8")
+            friendly = make_mobile_friendly(raw, is_program=is_interactive_program(raw))
+            (out_html_dir / path.name).write_text(friendly, encoding="utf-8")
             copied += 1
 
     index = build_guides_index()
