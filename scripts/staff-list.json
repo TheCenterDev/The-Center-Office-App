@@ -1,14 +1,14 @@
 [
-  { "name": "Jeff Wike", "email": "jeff@thecentercc.com" },
-  { "name": "Brad Boyles", "email": "brad@thecentercc.com" },
-  { "name": "Jake Johnson", "email": "jake@thecentercc.com" },
-  { "name": "Shawna Balsiger", "email": "shawna@thecentercc.com" },
-  { "name": "Dave Wieringa", "email": "dave@thecentercc.com" },
-  { "name": "Sarah Johnson", "email": "sarah@thecentercc.com" },
-  { "name": "Isaiah Humiston", "email": "isaiah@thecentercc.com" },
-  { "name": "Tim LaRue", "email": "tim@thecentercc.com" },
-  { "name": "Amanda Chapple", "email": "amanda@thecentercc.com" },
-  { "name": "Kylee Gudeman", "email": "kylee@thecentercc.com" },
-  { "name": "Liam Strong", "email": "liam@thecentercc.com" },
-  { "name": "Natalee Wieringa", "email": "natalee@thecentercc.com" }
+  { "name": "Jeff Wike", "email": "jeff@thecentercc.com", "role": "director" },
+  { "name": "Brad Boyles", "email": "brad@thecentercc.com", "role": "director" },
+  { "name": "Jake Johnson", "email": "jake@thecentercc.com", "role": "admin" },
+  { "name": "Shawna Balsiger", "email": "shawna@thecentercc.com", "role": "admin" },
+  { "name": "Dave Wieringa", "email": "dave@thecentercc.com", "role": "admin" },
+  { "name": "Sarah Johnson", "email": "sarah@thecentercc.com", "role": "staff" },
+  { "name": "Isaiah Humiston", "email": "isaiah@thecentercc.com", "role": "staff" },
+  { "name": "Tim LaRue", "email": "tim@thecentercc.com", "role": "staff" },
+  { "name": "Amanda Chapple", "email": "amanda@thecentercc.com", "role": "staff" },
+  { "name": "Kylee Gudeman", "email": "kylee@thecentercc.com", "role": "staff" },
+  { "name": "Liam Strong", "email": "liam@thecentercc.com", "role": "staff" },
+  { "name": "Natalee Wieringa", "email": "natalee@thecentercc.com", "role": "staff" }
 ]

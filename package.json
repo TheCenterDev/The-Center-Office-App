@@ -3,6 +3,6 @@
   "private": true,
   "description": "Node dependencies for one-off admin scripts (scripts/create_logins.js). Not part of the desktop app or the mobile build.",
   "dependencies": {
-    "firebase-admin": "^12.0.0"
+    "firebase-admin": "^12.7.0"
   }
 }
