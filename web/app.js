@@ -598,11 +598,45 @@
           var li = document.createElement("li");
           var nameSpan = document.createElement("span");
           nameSpan.textContent = u.name + " — " + u.email;
+
+          var right = document.createElement("span");
+          right.className = "team-row-right";
+
           var roleSpan = document.createElement("span");
           roleSpan.className = "team-role";
           roleSpan.textContent = u.role;
+          right.appendChild(roleSpan);
+
+          // Admin/Director can't set someone else's password directly --
+          // the Firebase client SDK only ever lets an account change its
+          // own password, and doing this properly server-side would need
+          // Cloud Functions, which (unlike everything else this project
+          // uses) isn't available on Firebase's no-cost Spark plan. This
+          // is the free equivalent: trigger the same "Forgot password?"
+          // email Firebase already sends from the sign-in screen, just
+          // aimed at someone else's account instead of your own.
+          var resetBtn = document.createElement("button");
+          resetBtn.type = "button";
+          resetBtn.className = "team-reset-btn";
+          resetBtn.textContent = "Reset password";
+          resetBtn.addEventListener("click", function () {
+            if (!window.confirm("Send a password reset email to " + u.email + "?")) return;
+            resetBtn.disabled = true;
+            resetBtn.textContent = "Sending…";
+            window.CenterAuth.sendPasswordReset(u.email)
+              .then(function () {
+                resetBtn.textContent = "Email sent";
+              })
+              .catch(function (err) {
+                resetBtn.disabled = false;
+                resetBtn.textContent = "Reset password";
+                window.alert((err && err.message) || "Couldn't send reset email.");
+              });
+          });
+          right.appendChild(resetBtn);
+
           li.appendChild(nameSpan);
-          li.appendChild(roleSpan);
+          li.appendChild(right);
           list.appendChild(li);
         });
       })

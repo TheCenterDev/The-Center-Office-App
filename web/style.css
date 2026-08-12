@@ -421,6 +421,20 @@ html, body {
   text-transform: capitalize;
 }
 
+.team-row-right { display: flex; align-items: center; gap: 10px; }
+.team-reset-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--cyan-soft);
+  color: var(--navy);
+  white-space: nowrap;
+}
+.team-reset-btn:disabled { opacity: 0.6; cursor: default; }
+
 .tool-card {
   margin: 24px;
   padding: 24px;

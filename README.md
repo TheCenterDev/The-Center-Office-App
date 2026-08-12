@@ -170,6 +170,16 @@ work beyond step 1):
 There's no self-service sign-up anywhere in the app on purpose — both
 steps above are deliberately manual and Admin/Director-only.
 
+**Changing passwords:** everyone can change their own from Settings →
+Security, once signed in. Admin/Director can also do it for someone
+else from the Team page — a **Reset password** button next to each
+person sends them Firebase's standard password-reset email. (There's
+no button that directly *sets* someone else's password to a chosen
+value — that would need a real backend function, i.e. Firebase Cloud
+Functions, which unlike everything else this project uses isn't
+available on the no-cost Spark plan. The reset-email approach stays
+entirely free.)
+
 ## Bulk-creating logins (script)
 
 Doing the two steps above one person at a time is fine for a single new
