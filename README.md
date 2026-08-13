@@ -53,6 +53,15 @@ That's it — no `pip install`, no PyInstaller, no manual folder assembly.
 Anyone updating the documents just needs to edit files in `html/` and
 push to `main`; the next release will include the changes automatically.
 
+### Updating an already-installed Mac app without using a browser
+
+`scripts/update_app.command` does steps 1–4 above in one go: double-click
+it in Finder (or run it in Terminal) any time after pushing a code change,
+and it downloads the latest Mac build, quits the app if it's open, and
+replaces the one in `/Applications` — no manual zip download or dragging
+files around. It only ever touches the app itself, never `html/`, `assets/`,
+or any of the files that live alongside it (those are managed separately).
+
 ## Folder contents
 
 ```
