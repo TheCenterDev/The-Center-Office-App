@@ -31,8 +31,17 @@ jobs:
         with:
           python-version: "3.11"
 
+      # pillow is listed explicitly on purpose: launcher.py needs it for the
+      # logo and the drawn search/team icons, but nothing here depends on it
+      # anymore now that customtkinter 6.x no longer pulls it in on its own.
+      # Leaving it implicit is what shipped a build with no logo at all --
+      # the PIL import is wrapped in try/except so the app ran fine, just
+      # with every image silently missing.
       - name: Install dependencies
-        run: pip install pyinstaller customtkinter tkinterweb pywebview
+        run: pip install pyinstaller customtkinter tkinterweb pywebview pillow
+
+      - name: Verify Pillow is importable before building
+        run: python -c "from PIL import Image, ImageDraw; print('Pillow OK')"
 
       - name: Build executable
         run: pyinstaller launcher.spec --noconfirm
@@ -66,11 +75,28 @@ jobs:
         with:
           python-version: "3.11"
 
+      # See the note on the Windows job above -- pillow must be explicit.
       - name: Install dependencies
-        run: pip install pyinstaller customtkinter tkinterweb pywebview
+        run: pip install pyinstaller customtkinter tkinterweb pywebview pillow
+
+      - name: Verify Pillow is importable before building
+        run: python -c "from PIL import Image, ImageDraw; print('Pillow OK')"
 
       - name: Build app
         run: pyinstaller launcher.spec --noconfirm
+
+      # Fails the build rather than shipping another app with no logo:
+      # PIL landing in the bundle is the thing that actually broke, and
+      # it broke silently, so it gets checked on the built output itself
+      # rather than trusted from the install step above.
+      - name: Verify Pillow made it into the built app
+        run: |
+          if ! find dist/TheCenterOfficeLauncher.app -iname "_imaging*" | grep -q .; then
+            echo "Pillow's compiled _imaging extension is missing from the built app."
+            echo "The logo and drawn icons would silently not render. Failing the build."
+            exit 1
+          fi
+          echo "Pillow bundled OK."
 
       - name: Assemble release folder (app + html + assets)
         run: |

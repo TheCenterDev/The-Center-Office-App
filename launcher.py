@@ -351,7 +351,12 @@ try:
     from PIL import Image, ImageDraw
     _pil_import_error = None
 except ImportError as _e:
-    Image = None  # CustomTkinter installs Pillow automatically; this is a fallback.
+    # Pillow is a real dependency (logo + drawn search/team icons), not an
+    # optional extra -- it's listed explicitly in the build workflow. This
+    # fallback only exists so a broken install degrades to "no images"
+    # instead of refusing to start; see log_pil_missing_once() below, which
+    # makes that state visible in error_log.txt instead of silent.
+    Image = None
     ImageDraw = None
     _pil_import_error = str(_e)
 
