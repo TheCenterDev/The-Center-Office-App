@@ -198,6 +198,14 @@ def main() -> int:
             (out_html_dir / path.name).write_text(friendly, encoding="utf-8")
             copied += 1
 
+    # Supporting files the tool pages load (currently center-session.js,
+    # the shared sign-in/database layer). Copied verbatim -- they aren't
+    # guides, so they're deliberately not run through
+    # make_mobile_friendly and never appear in the navigation.
+    for path in HTML_DIR.glob("*.js"):
+        if path.is_file():
+            shutil.copy2(path, out_html_dir / path.name)
+
     index = build_guides_index()
     (OUT_DIR / "guides-index.json").write_text(json.dumps(index, indent=2), encoding="utf-8")
 

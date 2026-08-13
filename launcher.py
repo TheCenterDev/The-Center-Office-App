@@ -64,7 +64,9 @@ as a standalone Windows .exe or Mac .app that colleagues can run
 without installing Python.
 """
 
+import base64
 import hashlib
+import os
 import html
 import html.parser
 import json
@@ -1617,9 +1619,12 @@ class LauncherApp:
                                    # logged in via one of the emergency shared logins
 
         self.settings = load_settings()
-        # Set at sign-in: the Firebase token authorising every read and
-        # write this session makes against the shared database.
+        # Set at sign-in: the Firebase tokens authorising every read and
+        # write this session makes against the shared database. The
+        # refresh token is additionally handed to interactive tools so
+        # they don't ask for a second login (see _open_program).
         self.id_token = ""
+        self.refresh_token = ""
         self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
         apply_theme(self.settings.get("theme", "light"))
         apply_font_scale(self.settings.get("font_scale", "normal"))
@@ -1725,13 +1730,16 @@ class LauncherApp:
         # arrow button doesn't fire off several overlapping requests.
         signing_in = {"busy": False}
 
-        def finish_login(profile, id_token):
+        def finish_login(profile, id_token, refresh_token):
             """Back on the UI thread, with a verified account and its
             profile from the shared database."""
             self.user_role = profile["role"]
             self.true_role = profile["role"]
             self.current_user = profile
             self.id_token = id_token
+            # Kept so tools opened from here can be handed this session
+            # instead of asking for the password all over again.
+            self.refresh_token = refresh_token
 
             # Personal settings (theme, text size, startup page, sidebar
             # state) live on the account in the database, so they follow
@@ -1817,7 +1825,9 @@ class LauncherApp:
                     ))
                     return
 
-                self.root.after(0, lambda: finish_login(profile, session["idToken"]))
+                self.root.after(0, lambda: finish_login(
+                    profile, session["idToken"], session.get("refreshToken", "")
+                ))
 
             threading.Thread(target=work, daemon=True).start()
 
@@ -2756,16 +2766,33 @@ class LauncherApp:
 
         The launcher window stays open the whole time — the tool just
         opens alongside it in its own window."""
+        # Hand this session to the tool so it doesn't ask for a password
+        # again -- signing into the launcher is meant to be the only
+        # login. Passed through the child process's environment rather
+        # than its command line: command lines are visible to anything
+        # that can list processes, environments are not.
+        environment = dict(os.environ)
+        environment.pop("CENTER_SESSION", None)
+        if getattr(self, "refresh_token", "") and self.current_user:
+            environment["CENTER_SESSION"] = json.dumps({
+                "refreshToken": self.refresh_token,
+                "email": self.current_user.get("email", ""),
+                "name": self.current_user.get("name", ""),
+                "role": self.current_user.get("role", "staff"),
+            })
+
         if webview is not None:
             try:
                 args = [sys.executable]
                 if not getattr(sys, "frozen", False):
                     args.append(str(Path(__file__).resolve()))
                 args += ["--webview", str(path.resolve()), title or APP_NAME]
-                subprocess.Popen(args)
+                subprocess.Popen(args, env=environment)
                 return
             except Exception:
                 pass
+        # Browser fallback: no way to hand the session over, so the tool
+        # will ask for a sign-in of its own.
         webbrowser.open(path.resolve().as_uri())
 
     # ---------------------------------------------------- content pane --
@@ -4358,6 +4385,14 @@ class LauncherApp:
         self.user_role = None
         self.true_role = None
         self.current_user = None
+        # Drop the session tokens too, so a tool opened after signing out
+        # (or after someone else signs in) can't still be handed the
+        # previous person's access. Tool windows already open keep
+        # working until they're closed -- they're separate programs with
+        # their own copy -- which is the same as any other app leaving an
+        # already-open window alone.
+        self.id_token = ""
+        self.refresh_token = ""
         self._selected_path = None
         self._last_search_query = ""
         # These are all long-lived references to this session's sidebar
@@ -4396,7 +4431,19 @@ def run_webview_window(file_path: str, title: str):
     if webview is None:
         print("pywebview is required to open this tool but isn't installed.")
         sys.exit(1)
-    webview.create_window(title, url=Path(file_path).resolve().as_uri())
+
+    url = Path(file_path).resolve().as_uri()
+    # The launcher passed its signed-in session in the environment (see
+    # _open_program). Hand it to the page in the URL fragment, which the
+    # page reads and immediately wipes. A fragment never leaves the
+    # machine -- it isn't sent to any server, and this is a local file
+    # in any case.
+    session = os.environ.get("CENTER_SESSION", "")
+    if session:
+        encoded = base64.urlsafe_b64encode(session.encode("utf-8")).decode("ascii")
+        url += "#session=" + encoded
+
+    webview.create_window(title, url=url)
     webview.start()
 
 

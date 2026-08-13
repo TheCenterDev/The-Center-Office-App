@@ -163,6 +163,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="center-session.js"></script>
 <script>
 /* Same Firebase project as the mobile site's login (see
  * web/firebase-config.js / web/auth.js) -- this is not a secret, see
@@ -204,34 +205,46 @@ document.getElementById("authForm").addEventListener("submit", e => {
 
 document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
 
-auth.onAuthStateChanged(user => {
-  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
-  if (!user) {
-    document.getElementById("authGate").style.display = "block";
-    document.getElementById("appArea").style.display = "none";
-    return;
-  }
-  const key = user.email.trim().toLowerCase();
-  db.collection("users").doc(key).get().then(snap => {
-    if (!snap.exists) {
+function startApp(profile) {
+  currentUserName = profile.name || profile.email;
+  document.getElementById("whoami").textContent = "Signed in as " + currentUserName;
+  document.getElementById("reporter").value = currentUserName;
+  document.getElementById("authGate").style.display = "none";
+  document.getElementById("appArea").style.display = "block";
+  listen();
+}
+
+if (CenterSession.isHandedOver()) {
+  // Opened from the app, which already knows who's signed in -- no
+  // second login. Signing out happens in the app itself.
+  const signOut = document.getElementById("signOutBtn");
+  if (signOut) signOut.style.display = "none";
+  startApp(CenterSession.user());
+} else {
+  auth.onAuthStateChanged(user => {
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    if (!user) {
       document.getElementById("authGate").style.display = "block";
       document.getElementById("appArea").style.display = "none";
-      document.getElementById("authError").textContent =
-        "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
       return;
     }
-    currentUserName = (snap.data() || {}).name || user.email;
-    document.getElementById("whoami").textContent = "Signed in as " + currentUserName;
-    document.getElementById("reporter").value = currentUserName;
-    document.getElementById("authGate").style.display = "none";
-    document.getElementById("appArea").style.display = "block";
-    listen();
+    CenterSession.getDoc("users", user.email.trim().toLowerCase()).then(profile => {
+      if (!profile) {
+        document.getElementById("authGate").style.display = "block";
+        document.getElementById("appArea").style.display = "none";
+        document.getElementById("authError").textContent =
+          "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
+        return;
+      }
+      profile.email = user.email;
+      startApp(profile);
+    });
   });
-});
+}
 
 function listen() {
-  unsubscribe = db.collection("maintenance_log").onSnapshot(snap => {
-    items = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+  unsubscribe = CenterSession.watchCollection("maintenance_log", docs => {
+    items = docs;
     render();
   }, err => {
     document.getElementById("formMsg").textContent = "Couldn't load the shared log: " + err.message;
@@ -251,7 +264,7 @@ document.getElementById("addBtn").addEventListener("click", () => {
   if (!description) { msg.textContent = "Add a description first."; msg.style.color = "var(--red)"; return; }
 
   const id = "m" + Date.now();
-  db.collection("maintenance_log").doc(id).set({
+  CenterSession.setDoc("maintenance_log", id, {
     location, priority, reporter, dateReported, description, status: "Open",
   }).then(() => {
     document.getElementById("description").value = "";
@@ -325,13 +338,13 @@ function render() {
 
   tbody.querySelectorAll(".statusSelect").forEach(sel => {
     sel.addEventListener("change", () => {
-      db.collection("maintenance_log").doc(sel.dataset.id).update({ status: sel.value });
+      CenterSession.setDoc("maintenance_log", sel.dataset.id, { status: sel.value }, { merge: true });
     });
   });
   tbody.querySelectorAll("[data-remove]").forEach(btn => {
     btn.addEventListener("click", () => {
       if (!confirm("Delete this entry?")) return;
-      db.collection("maintenance_log").doc(btn.dataset.remove).delete();
+      CenterSession.deleteDoc("maintenance_log", btn.dataset.remove);
     });
   });
 }

@@ -110,6 +110,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="center-session.js"></script>
 <script>
 /* Same Firebase project as the mobile site's login (see
  * web/firebase-config.js / web/auth.js) -- this is not a secret, see
@@ -185,7 +186,6 @@ let templateUnsub = null;
 let canEditTemplate = false;   // Admin/Director only; also enforced by firestore.rules
 let editingTemplate = false;
 
-const TEMPLATE_DOC = () => db.collection("onboarding_template").doc("default");
 
 /* Checklist text is typed by staff and then placed into the page. Going
  * through innerHTML with raw text would let anything typed into a
@@ -237,53 +237,61 @@ document.getElementById("authForm").addEventListener("submit", e => {
 
 document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
 
-auth.onAuthStateChanged(user => {
-  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
-  if (templateUnsub) { templateUnsub(); templateUnsub = null; }
-  if (!user) {
-    document.getElementById("authGate").style.display = "block";
-    document.getElementById("appArea").style.display = "none";
-    return;
-  }
-  const key = user.email.trim().toLowerCase();
-  db.collection("users").doc(key).get().then(snap => {
-    if (!snap.exists) {
+function startApp(profile) {
+  canEditTemplate = profile.role === "admin" || profile.role === "director";
+  document.getElementById("editChecklistBtn").style.display = canEditTemplate ? "" : "none";
+  document.getElementById("whoami").textContent = "Signed in as " + (profile.name || profile.email);
+  document.getElementById("authGate").style.display = "none";
+  document.getElementById("appArea").style.display = "block";
+  listenTemplate();
+  listen();
+}
+
+if (CenterSession.isHandedOver()) {
+  // Opened from the app, which already knows who's signed in -- no
+  // second login. Signing out is done in the app itself, so its button
+  // here would be misleading.
+  const signOut = document.getElementById("signOutBtn");
+  if (signOut) signOut.style.display = "none";
+  startApp(CenterSession.user());
+} else {
+  auth.onAuthStateChanged(user => {
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    if (templateUnsub) { templateUnsub(); templateUnsub = null; }
+    if (!user) {
       document.getElementById("authGate").style.display = "block";
       document.getElementById("appArea").style.display = "none";
-      document.getElementById("authError").textContent =
-        "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
       return;
     }
-    const profile = snap.data() || {};
-    // Editing the checklist changes it for every future hire and every
-    // person in the organisation, so it's limited to Admin/Director.
-    // This only hides the controls -- firestore.rules is what actually
-    // enforces it, since anything in a web page can be bypassed.
-    canEditTemplate = profile.role === "admin" || profile.role === "director";
-    document.getElementById("editChecklistBtn").style.display = canEditTemplate ? "" : "none";
-    document.getElementById("whoami").textContent = "Signed in as " + (profile.name || user.email);
-    document.getElementById("authGate").style.display = "none";
-    document.getElementById("appArea").style.display = "block";
-    listenTemplate();
-    listen();
+    CenterSession.getDoc("users", user.email.trim().toLowerCase()).then(profile => {
+      if (!profile) {
+        document.getElementById("authGate").style.display = "block";
+        document.getElementById("appArea").style.display = "none";
+        document.getElementById("authError").textContent =
+          "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
+        return;
+      }
+      profile.email = user.email;
+      startApp(profile);
+    });
   });
-});
+}
 
 function listenTemplate() {
-  templateUnsub = TEMPLATE_DOC().onSnapshot(snap => {
-    if (!snap.exists) {
+  templateUnsub = CenterSession.watchDoc("onboarding_template", "default", doc => {
+    if (!doc) {
       // First ever run: publish the built-in checklist so there's
       // something to work from. Only an Admin/Director is allowed to
       // write it; if a staff member happens to be first, they simply
       // see an empty checklist until someone with permission opens it.
       if (canEditTemplate) {
-        TEMPLATE_DOC().set({ groups: DEFAULT_CHECKLIST }).catch(() => {});
+        CenterSession.setDoc("onboarding_template", "default", { groups: DEFAULT_CHECKLIST }).catch(() => {});
       }
       CHECKLIST = [];
       renderHireArea();
       return;
     }
-    CHECKLIST = (snap.data() || {}).groups || [];
+    CHECKLIST = doc.groups || [];
     renderHireArea();
   }, err => {
     document.getElementById("hireArea").innerHTML =
@@ -292,15 +300,15 @@ function listenTemplate() {
 }
 
 function saveTemplate(groups) {
-  return TEMPLATE_DOC().set({ groups }, { merge: false }).catch(err => {
+  return CenterSession.setDoc("onboarding_template", "default", { groups }).catch(err => {
     alert("Couldn't save the checklist: " + err.message);
   });
 }
 
 function listen() {
-  unsubscribe = db.collection("onboarding_hires").onSnapshot(snap => {
+  unsubscribe = CenterSession.watchCollection("onboarding_hires", docs => {
     data = {};
-    snap.forEach(d => { data[d.id] = d.data(); });
+    docs.forEach(d => { const copy = Object.assign({}, d); delete copy.id; data[d.id] = copy; });
     if (!currentId || !data[currentId]) currentId = Object.keys(data)[0] || null;
     renderHireSelect();
     renderHireArea();
@@ -335,18 +343,18 @@ function newHire() {
   const name = prompt("New hire's name:");
   if (!name) return;
   const id = "h" + Date.now();
-  db.collection("onboarding_hires").doc(id).set({ name, startDate: "", checked: {}, custom: [] })
+  CenterSession.setDoc("onboarding_hires", id, { name, startDate: "", checked: {}, custom: [] })
     .then(() => { currentId = id; });
 }
 
 function removeHire() {
   if (!currentId) return;
   if (!confirm("Remove " + (data[currentId].name || "this hire") + "'s onboarding record? This can't be undone.")) return;
-  db.collection("onboarding_hires").doc(currentId).delete().then(() => { currentId = null; });
+  CenterSession.deleteDoc("onboarding_hires", currentId).then(() => { currentId = null; });
 }
 
 function updateHire(id, partial) {
-  db.collection("onboarding_hires").doc(id).set(partial, { merge: true });
+  CenterSession.setDoc("onboarding_hires", id, partial, { merge: true });
 }
 
 function mailtoLink(subject, body) {
