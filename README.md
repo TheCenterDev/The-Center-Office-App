@@ -158,6 +158,44 @@ real app, no App Store or Play Store needed.
   reads the same `html/` files, so there's nothing extra to maintain.
 - The site requires signing in — see "Mobile login and accounts" below.
 
+## One account, everywhere
+
+The desktop app and the mobile site now share a single set of accounts,
+roles, and personal display settings, stored in the same free Firebase
+project. Sign in with the same email and password in either place.
+
+What that changes, compared to how the desktop app used to work:
+
+- **No more `users.json`.** Accounts used to live in a file next to the
+  app, so every computer had its own separate copy — someone added on
+  one machine simply didn't exist on another, and a password changed in
+  one place didn't change anywhere else. That file is now ignored; if
+  one is still lying around it does nothing.
+- **No more shared `director` / `admin` / `staff` logins.** Those had
+  their passwords written in plain text in `launcher.py`, which is in a
+  public repository that also publishes the staff Contacts page — the
+  email addresses and the passwords were both published. Everyone signs
+  in as themselves now.
+- **Nobody can look up anyone's password, including a Director.**
+  Firebase stores passwords hashed and won't return them to the app, to
+  the console, or to anyone. The Team page's old "Show password" and
+  "Change Password" controls are replaced with **Send Reset Email**,
+  which mails that person a link to set their own.
+- **Your theme and text size follow you.** Change them on one computer
+  and they apply on every other one, and on the mobile site.
+- **The app needs an internet connection to sign in.** It talks to
+  Firebase at the login screen. Once you're in, reading guides works
+  normally; sign-in itself won't work offline.
+
+**Everyone must reset their password once.** The desktop passwords that
+used to live in `users.json` were never the same as the Firebase ones,
+and can't be transferred (they were plain text on one side, hashed on
+the other). So the first time anyone opens the updated desktop app:
+enter your email, click **Forgot password?**, and follow the link
+Firebase emails you. That same password then works on the mobile site
+too. Check spam the first time — it comes from a firebaseapp.com
+address.
+
 ## Mobile login and accounts
 
 The mobile site is backed by a free Firebase project (Authentication +

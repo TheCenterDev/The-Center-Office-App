@@ -1,12 +1,13 @@
 name: Set staff roles
 
 # Syncs each person's role (staff / admin / director) from
-# scripts/staff-list.json to their Firestore profile. See
-# scripts/set_password_and_roles.js.
+# scripts/staff-list.json to their Firestore profile.
+# See scripts/set_roles.js.
 #
-# By default this does NOT touch anyone's password. People set their own
-# by opening the mobile site, entering their email, and tapping "Forgot
-# password?", which has Firebase email them a link.
+# This cannot change anyone's password -- there is no shared password in
+# this system. People set their own by opening the mobile site, entering
+# their email, and tapping "Forgot password?", which has Firebase email
+# them a link.
 #
 # Manual only -- there is no schedule.
 #
@@ -15,18 +16,12 @@ name: Set staff roles
 #   FIREBASE_SERVICE_ACCOUNT  -- full contents of a Firebase service
 #                                account JSON key (already set up for
 #                                the Todoist sync workflow)
-#
-# Optional, and normally left unset:
-#   STAFF_SHARED_PASSWORD     -- if present, ALSO overwrites every
-#                                listed person's password with this
-#                                value, including for anyone who has
-#                                already chosen their own.
 
 on:
   workflow_dispatch: {}
 
 jobs:
-  set-passwords:
+  set-roles:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -42,6 +37,5 @@ jobs:
 
       - name: Apply roles
         env:
-          STAFF_SHARED_PASSWORD: ${{ secrets.STAFF_SHARED_PASSWORD }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: node scripts/set_password_and_roles.js
+        run: node scripts/set_roles.js

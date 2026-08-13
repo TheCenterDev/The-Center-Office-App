@@ -71,10 +71,13 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import tkinter as tk
 import traceback
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 from pathlib import Path
 from tkinter import StringVar, filedialog, messagebox
@@ -559,23 +562,20 @@ LOGIN_TEXT = "#1D2071"
 LOGIN_BORDER = "#dde1ee"
 LOGIN_ACCENT_SOFT = "#e3f8ff"
 
-# Real per-person accounts now live in users.json (name/email/password/
-# role — see USERS_FILE/load_users()/save_users() below), managed from
-# the Director-only Team page. These three shared logins are kept only
-# as an emergency fallback — if users.json is ever missing, empty, or
-# corrupted, these still get in the door. Director outranks Admin:
-# everything Admin can do, plus managing the whole team (see
-# _show_team) and changing anyone's password, including another
-# Director's.
-DIRECTOR_USERNAME = "director"
-DIRECTOR_PASSWORD = "Th3CeNt3r2005!"
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "TH3Center1"
-STAFF_USERNAME = "staff"
-STAFF_PASSWORD = "Center123"
+# Accounts live in the shared Firebase database, the same one the mobile
+# site uses -- see the "shared database" section further down. There is
+# no password stored anywhere in this file, this app, or this repository.
+#
+# There used to be three shared logins here (director/admin/staff, with
+# their passwords written in plain text) as a fallback for a missing
+# users.json. They're gone: this repository is public, it publishes the
+# staff Contacts page, and a password committed next to the matching
+# email addresses is simply a published password. Everyone now signs in
+# as themselves, and recovers access with "Forgot password?" on the
+# login screen, which emails them a link.
 
 # Valid roles, lowest to highest. Used to build the role-choice
-# dropdown on the Team page and to validate users.json entries.
+# dropdown on the Team page and to validate profiles from the database.
 ROLES = ("staff", "admin", "director")
 ROLE_LABELS = {"staff": "Staff", "admin": "Admin", "director": "Director"}
 
@@ -824,25 +824,16 @@ DEFAULT_SETTINGS = {
     "font_scale": "normal",  # key into FONT_SCALES
     "default_page": "home",  # "home" | "apps" — which page shows right after login
     "sidebar_expanded": True,
-    "remember_username": True,  # prefill the last-used login username
+    "remember_username": True,  # prefill the last-used login email
     "last_username": "",
-    # Fallback values for the emergency shared admin/staff/director
-    # logins (see ADMIN_USERNAME etc. above) — not exposed anywhere in
-    # the UI anymore now that real people are managed on the Team page,
-    # but kept here (and preserved by "Reset to Defaults") as a way back
-    # in if users.json is ever lost.
-    "staff_password": STAFF_PASSWORD,
-    "admin_password": ADMIN_PASSWORD,
-    "director_password": DIRECTOR_PASSWORD,
 }
 
-# Which of the keys above are "my settings" -- tied to the person who's
-# logged in (see users.json's "preferences" field) rather than the
-# device. remember_username/last_username and the three emergency
-# shared passwords stay device-level: username-remembering only makes
-# sense before anyone's identity is known yet (it drives what's
-# prefilled on the login screen itself), and the shared passwords are a
-# recovery mechanism, not a display preference.
+# Which of the keys above are "my settings" -- stored on the person's
+# own row in the shared database, so they follow them to any computer or
+# to the mobile site, rather than living on one device.
+# remember_username/last_username stay device-level: they only matter
+# before anyone's identity is known yet, since they drive what's
+# prefilled on the login screen itself.
 PERSONAL_SETTING_KEYS = ("theme", "font_scale", "default_page", "sidebar_expanded")
 
 
@@ -872,111 +863,272 @@ def save_settings(settings: dict):
         pass
 
 
-def load_users() -> list:
-    """Reads users.json next to html/ and assets/ — a list of
-    {"name", "email", "password", "role", "preferences"} records, one
-    per real person with access to this app. "preferences" holds that
-    person's own Settings choices (see PERSONAL_SETTING_KEYS) so their
-    theme/font size/startup page/sidebar state follow them to whichever
-    login they use, rather than living on the device. Returns [] if the
-    file is missing, empty, or corrupted (a fresh install, or one where
-    nobody's been added to the Team page yet); the emergency shared
-    admin/staff/director logins (see ADMIN_USERNAME etc.) still work
-    either way. Any record missing a required field or with an
-    unrecognized role is dropped rather than letting one bad entry break
-    the whole list."""
+# NOTE: users.json, shared_preferences.json, and their load/save helpers
+# used to live here. They're gone -- accounts, roles, and personal
+# display settings are read from and written to the shared Firebase
+# database instead (see the section below), so every computer and phone
+# sees the same thing rather than each keeping its own divergent copy.
+# Any old users.json still sitting next to the app is simply ignored.
+
+
+# ---------------------------------------------------------------------
+# The shared database (Firebase)
+# ---------------------------------------------------------------------
+# Logins, roles, and personal display settings live in the same Firebase
+# project the mobile site uses, so one account works everywhere and a
+# change made on a phone shows up on every desktop. There used to be a
+# users.json file next to the app holding names, roles, and plaintext
+# passwords -- per machine, so each computer had its own divergent copy
+# and someone added on one was invisible on the others.
+#
+# Deliberately talks to Firebase's REST API with nothing but the
+# standard library rather than pulling in the firebase-admin SDK:
+#   - the SDK is a large dependency to bundle into a PyInstaller build,
+#     and it exists to hold a *service account* key, which is a master
+#     credential that must never ship inside an app people install;
+#   - the REST endpoints below take the same public web API key the
+#     mobile site already exposes, and every read/write is checked
+#     against firestore.rules using the signed-in person's own token.
+#     A staff member's copy of this app therefore has exactly the
+#     permissions their account has, no more.
+FIREBASE_API_KEY = "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg"
+FIREBASE_PROJECT_ID = "the-center-office-app"
+
+IDENTITY_URL = "https://identitytoolkit.googleapis.com/v1/accounts"
+FIRESTORE_URL = (
+    f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}"
+    "/databases/(default)/documents"
+)
+
+NETWORK_TIMEOUT = 20  # seconds; generous, since a slow office link shouldn't fail a login
+
+
+class FirebaseError(Exception):
+    """Any failure talking to Firebase. .friendly is a message safe to
+    show a non-technical person; str() keeps the raw detail for the log."""
+
+    def __init__(self, friendly, detail=""):
+        super().__init__(detail or friendly)
+        self.friendly = friendly
+
+
+def _http_json(url, payload=None, token=None, method=None):
+    """Small JSON-in/JSON-out helper over urllib. Raises FirebaseError
+    with a readable message rather than letting urllib's exceptions
+    surface, since these end up in front of end users."""
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(url, data=data, method=method)
+    request.add_header("Content-Type", "application/json")
+    if token:
+        request.add_header("Authorization", "Bearer " + token)
     try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, ValueError):
-        return []
-    if not isinstance(raw, list):
-        return []
-    users = []
-    for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        name = str(entry.get("name", "")).strip()
-        email = str(entry.get("email", "")).strip().lower()
-        password = entry.get("password", "")
-        role = entry.get("role", "")
-        raw_prefs = entry.get("preferences", {})
-        preferences = {
-            k: v for k, v in raw_prefs.items() if k in PERSONAL_SETTING_KEYS
-        } if isinstance(raw_prefs, dict) else {}
-        if name and email and isinstance(password, str) and password and role in ROLES:
-            users.append({
-                "name": name, "email": email, "password": password, "role": role,
-                "preferences": preferences,
+        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT) as response:
+            body = response.read().decode("utf-8")
+        return json.loads(body) if body else {}
+    except urllib.error.HTTPError as e:
+        raw = ""
+        try:
+            raw = e.read().decode("utf-8")
+            message = json.loads(raw).get("error", {}).get("message", "")
+        except Exception:
+            message = ""
+        raise FirebaseError(_friendly_firebase_message(e.code, message), f"HTTP {e.code}: {raw}")
+    except urllib.error.URLError as e:
+        raise FirebaseError(
+            "Can't reach the internet. This app needs a connection to sign in.",
+            f"URLError: {e.reason}",
+        )
+    except (TimeoutError, OSError) as e:
+        raise FirebaseError(
+            "The connection timed out. Check your internet and try again.", str(e)
+        )
+
+
+def _friendly_firebase_message(status_code, message):
+    """Firebase's own error strings are SHOUTY_SNAKE_CASE and unhelpful
+    to the person reading them, so they're translated here."""
+    mapping = {
+        "EMAIL_NOT_FOUND": "Incorrect email or password.",
+        "INVALID_PASSWORD": "Incorrect email or password.",
+        "INVALID_LOGIN_CREDENTIALS": "Incorrect email or password.",
+        "INVALID_EMAIL": "That doesn't look like a valid email address.",
+        "USER_DISABLED": "That account has been disabled. Ask a Director.",
+        "TOO_MANY_ATTEMPTS_TRY_LATER": "Too many attempts. Wait a few minutes and try again.",
+        "WEAK_PASSWORD : Password should be at least 6 characters":
+            "That password is too short — use at least 6 characters.",
+        "MISSING_PASSWORD": "Enter your password.",
+    }
+    for key, friendly in mapping.items():
+        if message.startswith(key):
+            return friendly
+    if status_code == 403:
+        return "Your account doesn't have permission to do that."
+    if status_code == 404:
+        return "That wasn't found in the database."
+    return "Something went wrong talking to the database. Details in error_log.txt."
+
+
+# --- Firestore's REST format stores every value tagged with its type, ---
+# --- e.g. {"stringValue": "Jeff"}. These convert to and from that.    ---
+
+def _from_firestore_value(value: dict):
+    if "stringValue" in value:
+        return value["stringValue"]
+    if "booleanValue" in value:
+        return value["booleanValue"]
+    if "integerValue" in value:
+        return int(value["integerValue"])
+    if "doubleValue" in value:
+        return value["doubleValue"]
+    if "nullValue" in value:
+        return None
+    if "mapValue" in value:
+        return _from_firestore_fields(value["mapValue"].get("fields", {}))
+    if "arrayValue" in value:
+        return [_from_firestore_value(v) for v in value["arrayValue"].get("values", [])]
+    return None
+
+
+def _from_firestore_fields(fields: dict) -> dict:
+    return {key: _from_firestore_value(value) for key, value in (fields or {}).items()}
+
+
+def _to_firestore_value(value):
+    if isinstance(value, bool):
+        return {"booleanValue": value}
+    if isinstance(value, int):
+        return {"integerValue": str(value)}
+    if isinstance(value, float):
+        return {"doubleValue": value}
+    if isinstance(value, dict):
+        return {"mapValue": {"fields": {k: _to_firestore_value(v) for k, v in value.items()}}}
+    if isinstance(value, (list, tuple)):
+        return {"arrayValue": {"values": [_to_firestore_value(v) for v in value]}}
+    if value is None:
+        return {"nullValue": None}
+    return {"stringValue": str(value)}
+
+
+def _to_firestore_fields(data: dict) -> dict:
+    return {key: _to_firestore_value(value) for key, value in data.items()}
+
+
+def firebase_sign_in(email: str, password: str) -> dict:
+    """Verifies an email/password against Firebase Authentication.
+    Returns {"idToken", "refreshToken", "email"}. Raises FirebaseError
+    with a friendly message on bad credentials or no connection."""
+    result = _http_json(
+        f"{IDENTITY_URL}:signInWithPassword?key={FIREBASE_API_KEY}",
+        {"email": email, "password": password, "returnSecureToken": True},
+    )
+    return {
+        "idToken": result.get("idToken", ""),
+        "refreshToken": result.get("refreshToken", ""),
+        "email": result.get("email", email).strip().lower(),
+    }
+
+
+def firebase_send_password_reset(email: str):
+    """Asks Firebase to email a "choose a new password" link. This is how
+    everyone gets in the first time -- no password is ever handed out or
+    stored anywhere."""
+    _http_json(
+        f"{IDENTITY_URL}:sendOobCode?key={FIREBASE_API_KEY}",
+        {"requestType": "PASSWORD_RESET", "email": email},
+    )
+
+
+def firebase_change_own_password(id_token: str, new_password: str) -> str:
+    """Changes the signed-in person's own password. Firebase issues a
+    fresh token afterwards, which is returned so the session keeps
+    working."""
+    result = _http_json(
+        f"{IDENTITY_URL}:update?key={FIREBASE_API_KEY}",
+        {"idToken": id_token, "password": new_password, "returnSecureToken": True},
+    )
+    return result.get("idToken", id_token)
+
+
+def firestore_get_profile(id_token: str, email: str):
+    """That person's row in the shared users collection: name, role, and
+    their display preferences. Returns None if they can sign in but
+    nobody has given them a profile yet."""
+    key = urllib.parse.quote(email.strip().lower(), safe="")
+    try:
+        document = _http_json(f"{FIRESTORE_URL}/users/{key}", token=id_token)
+    except FirebaseError as e:
+        if "HTTP 404" in str(e):
+            return None
+        raise
+    fields = _from_firestore_fields(document.get("fields", {}))
+    raw_prefs = fields.get("preferences") or {}
+    return {
+        "email": email.strip().lower(),
+        "name": fields.get("name") or email,
+        "role": fields.get("role") if fields.get("role") in ROLES else "staff",
+        "preferences": {k: v for k, v in raw_prefs.items() if k in PERSONAL_SETTING_KEYS},
+    }
+
+
+def firestore_save_preferences(id_token: str, email: str, preferences: dict):
+    """Writes just the preferences field, leaving name and role alone --
+    which is also all firestore.rules permits a non-admin to change on
+    their own row, so this matches what the server will actually allow."""
+    key = urllib.parse.quote(email.strip().lower(), safe="")
+    clean = {k: v for k, v in preferences.items() if k in PERSONAL_SETTING_KEYS}
+    _http_json(
+        f"{FIRESTORE_URL}/users/{key}?updateMask.fieldPaths=preferences",
+        {"fields": _to_firestore_fields({"preferences": clean})},
+        token=id_token,
+        method="PATCH",
+    )
+
+
+def firestore_list_profiles(id_token: str) -> list:
+    """Everyone with a profile, for the Team page. firestore.rules only
+    allows this for Admin/Director accounts."""
+    people = []
+    page_token = ""
+    while True:
+        url = f"{FIRESTORE_URL}/users?pageSize=300"
+        if page_token:
+            url += "&pageToken=" + urllib.parse.quote(page_token)
+        result = _http_json(url, token=id_token)
+        for document in result.get("documents", []):
+            fields = _from_firestore_fields(document.get("fields", {}))
+            email = document.get("name", "").rsplit("/", 1)[-1]
+            people.append({
+                "email": email,
+                "name": fields.get("name") or email,
+                "role": fields.get("role") if fields.get("role") in ROLES else "staff",
             })
-    return users
+        page_token = result.get("nextPageToken", "")
+        if not page_token:
+            break
+    people.sort(key=lambda p: p["name"].lower())
+    return people
 
 
-def save_users(users: list):
-    """Best-effort write, same as save_settings — if it fails, the in-
-    memory list is still correct for the rest of this session, it just
-    won't have persisted for next launch."""
-    try:
-        with open(USERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(users, f, indent=2)
-    except OSError:
-        pass
+def firestore_save_profile(id_token: str, email: str, name: str, role: str):
+    """Creates or updates someone's name and role. Admin/Director only,
+    enforced by firestore.rules rather than trusted from the UI."""
+    key = urllib.parse.quote(email.strip().lower(), safe="")
+    _http_json(
+        f"{FIRESTORE_URL}/users/{key}"
+        "?updateMask.fieldPaths=name&updateMask.fieldPaths=role",
+        {"fields": _to_firestore_fields({"name": name, "role": role})},
+        token=id_token,
+        method="PATCH",
+    )
 
 
-# Lives right next to users.json/settings.json -- no separate per-device
-# configuration to set up. If this whole app folder happens to sit inside
-# a shared/synced location (a Google Drive for Desktop folder, a network
-# share, etc.) instead of a plain local one, this file -- and the display
-# preferences in it -- follow along automatically, the same way html/ and
-# assets/ would. If it doesn't, this just behaves like an ordinary local
-# file, same as it does today. Kept as its own small file instead of
-# folded into users.json since it holds no passwords or anything
-# sensitive -- unlike users.json, there's nothing wrong with this one
-# being visible in a shared/synced location.
-SHARED_PREFS_FILE = BASE_DIR / "shared_preferences.json"
-
-
-def load_shared_preferences() -> dict:
-    """Reads {email: {theme, font_scale, default_page, sidebar_expanded}}
-    from SHARED_PREFS_FILE -- one entry per person who's ever changed a
-    setting on any device that shares this same app folder. Returns {}
-    for a missing, unreadable, or malformed file, so this is a no-op
-    until the file actually exists."""
-    try:
-        with open(SHARED_PREFS_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    result = {}
-    for email, prefs in raw.items():
-        if isinstance(prefs, dict):
-            result[str(email).strip().lower()] = {
-                k: v for k, v in prefs.items() if k in PERSONAL_SETTING_KEYS
-            }
-    return result
-
-
-def save_shared_preference(email: str, prefs: dict):
-    """Best-effort read-merge-write of just one person's entry into the
-    shared file, so two different people saving a preference around the
-    same time don't clobber each other's entries. Silently does nothing
-    if the write fails (folder isn't writable, a sync client has it
-    briefly locked, ...) -- a hiccup here should never block using the
-    app, it just means that save didn't make it to the shared file this
-    time."""
-    if not email:
-        return
-    try:
-        all_prefs = load_shared_preferences()
-        all_prefs[email.strip().lower()] = {
-            k: v for k, v in prefs.items() if k in PERSONAL_SETTING_KEYS
-        }
-        with open(SHARED_PREFS_FILE, "w", encoding="utf-8") as f:
-            json.dump(all_prefs, f, indent=2)
-    except OSError:
-        pass
+def firestore_delete_profile(id_token: str, email: str):
+    """Removes someone's profile, which takes away their access to
+    everything in the app. Their Firebase sign-in itself still exists
+    until it's deleted in the Firebase console -- but with no profile,
+    the app won't let them past the login screen."""
+    key = urllib.parse.quote(email.strip().lower(), safe="")
+    _http_json(f"{FIRESTORE_URL}/users/{key}", token=id_token, method="DELETE")
 
 
 def display_name_from_filename(filename: str) -> str:
@@ -1352,7 +1504,9 @@ class LauncherApp:
                                    # logged in via one of the emergency shared logins
 
         self.settings = load_settings()
-        self.users = load_users()
+        # Set at sign-in: the Firebase token authorising every read and
+        # write this session makes against the shared database.
+        self.id_token = ""
         self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
         apply_theme(self.settings.get("theme", "light"))
         apply_font_scale(self.settings.get("font_scale", "normal"))
@@ -1454,71 +1608,128 @@ class LauncherApp:
         )
         password_entry.pack(side="left", padx=(0, LOGIN_FIELD_GAP))
 
-        def attempt_login(*_event):
-            username = username_var.get().strip().lower()
-            password = password_var.get()
-            # Extra layer on top of users.json: the emergency shared
-            # logins (director/admin/staff) are plain words, not real
-            # emails, so they're exempt -- but anything else has to end
-            # in @thecentercc.com or it's rejected outright, before it's
-            # ever compared against a stored password.
-            is_legacy_username = username in (DIRECTOR_USERNAME, ADMIN_USERNAME, STAFF_USERNAME)
-            if not is_legacy_username and not username.endswith("@" + ALLOWED_EMAIL_DOMAIN):
-                error_var.set("Incorrect email or password.")
-                password_var.set("")
-                return
-            matched_user = next(
-                (u for u in self.users if u["email"] == username and u["password"] == password), None
-            )
-            if matched_user is not None:
-                role = matched_user["role"]
-            elif username == DIRECTOR_USERNAME and password == self.settings.get("director_password", DIRECTOR_PASSWORD):
-                role = "director"
-            elif username == ADMIN_USERNAME and password == self.settings.get("admin_password", ADMIN_PASSWORD):
-                role = "admin"
-            elif username == STAFF_USERNAME and password == self.settings.get("staff_password", STAFF_PASSWORD):
-                role = "staff"
-            else:
-                error_var.set("Incorrect email or password.")
-                password_var.set("")
-                return
-            self.user_role = role
-            self.true_role = role
-            self.current_user = matched_user
-            if matched_user is not None:
-                # Personal settings (theme, text size, startup page,
-                # sidebar state) travel with the account instead of the
-                # device -- overlay whatever this person has already
-                # chosen on top of the device's own settings.json, then
-                # re-apply right away so the loading screen and layout
-                # that are about to build reflect their choices instead
-                # of whoever last used this computer.
-                prefs = dict(matched_user.setdefault("preferences", {}))
-                # shared_preferences.json (see SHARED_PREFS_FILE) wins
-                # over this device's own local cache -- that's the whole
-                # point: a choice made on a different computer that
-                # shares this same app folder should follow the person
-                # here, not get overridden by whatever this computer
-                # last cached.
-                shared_prefs = load_shared_preferences().get(matched_user["email"], {})
-                if shared_prefs:
-                    prefs.update(shared_prefs)
-                    matched_user["preferences"] = prefs
-                    save_users(self.users)
-                for key in PERSONAL_SETTING_KEYS:
-                    if key in prefs:
-                        self.settings[key] = prefs[key]
-                apply_theme(self.settings.get("theme", "light"))
-                apply_font_scale(self.settings.get("font_scale", "normal"))
-                self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
+        # Set while a sign-in is in flight, so hammering Return or the
+        # arrow button doesn't fire off several overlapping requests.
+        signing_in = {"busy": False}
+
+        def finish_login(profile, id_token):
+            """Back on the UI thread, with a verified account and its
+            profile from the shared database."""
+            self.user_role = profile["role"]
+            self.true_role = profile["role"]
+            self.current_user = profile
+            self.id_token = id_token
+
+            # Personal settings (theme, text size, startup page, sidebar
+            # state) live on the account in the database, so they follow
+            # the person to any computer or phone. Applied before the
+            # rest of the UI builds so it comes up in their theme rather
+            # than whoever last used this machine.
+            prefs = profile.get("preferences", {})
+            for key in PERSONAL_SETTING_KEYS:
+                if key in prefs:
+                    self.settings[key] = prefs[key]
+            apply_theme(self.settings.get("theme", "light"))
+            apply_font_scale(self.settings.get("font_scale", "normal"))
+            self._sidebar_expanded = bool(self.settings.get("sidebar_expanded", True))
+
             if self.settings.get("remember_username", True):
-                self.settings["last_username"] = username
-                save_settings(self.settings)
+                self.settings["last_username"] = profile["email"]
+            save_settings(self.settings)
+
             self.root.unbind("<Return>")
             self.login_screen.destroy()
             self._show_loading_screen()
 
-        ctk.CTkButton(
+        def login_failed(message, password_was_wrong=True):
+            signing_in["busy"] = False
+            submit_button.configure(state="normal", text="→")
+            error_var.set(message)
+            if password_was_wrong:
+                password_var.set("")
+
+        def attempt_login(*_event):
+            if signing_in["busy"]:
+                return
+            username = username_var.get().strip().lower()
+            password = password_var.get()
+
+            if not username.endswith("@" + ALLOWED_EMAIL_DOMAIN):
+                error_var.set(f"Use your @{ALLOWED_EMAIL_DOMAIN} email address.")
+                password_var.set("")
+                return
+            if not password:
+                error_var.set("Enter your password.")
+                return
+
+            signing_in["busy"] = True
+            error_var.set("")
+            submit_button.configure(state="disabled", text="…")
+
+            def work():
+                """Runs off the UI thread: a sign-in involves two network
+                round trips, and on a slow connection doing that inline
+                would freeze the window (and on Windows, grey it out and
+                show "Not Responding") for as long as it took."""
+                try:
+                    session = firebase_sign_in(username, password)
+                    profile = firestore_get_profile(session["idToken"], session["email"])
+                except FirebaseError as e:
+                    write_error_log(f"(sign-in failed for {username})\n{e}\n")
+                    # Bound to a plain local first: Python deletes `e`
+                    # when the except block ends, so a lambda that runs
+                    # later (which is the whole point of root.after)
+                    # would raise NameError instead of showing the
+                    # message. Same pattern everywhere below.
+                    message = e.friendly
+                    self.root.after(0, lambda: login_failed(message))
+                    return
+                except Exception:
+                    write_error_log(f"(unexpected sign-in error)\n{traceback.format_exc()}")
+                    self.root.after(0, lambda: login_failed(
+                        "Something went wrong signing in. Details in error_log.txt."
+                    ))
+                    return
+
+                if profile is None:
+                    # Their password is right, but nobody has given them
+                    # a profile yet -- so the app has no idea who they
+                    # are or what they should see. Deliberately a
+                    # different message from a wrong password, since the
+                    # fix is completely different.
+                    self.root.after(0, lambda: login_failed(
+                        "Your password works, but you don't have access yet. "
+                        "Ask a Director to add you on the Team page.",
+                        password_was_wrong=False,
+                    ))
+                    return
+
+                self.root.after(0, lambda: finish_login(profile, session["idToken"]))
+
+            threading.Thread(target=work, daemon=True).start()
+
+        def forgot_password():
+            username = username_var.get().strip().lower()
+            if not username:
+                error_var.set("Type your email address first, then click this.")
+                return
+
+            def work():
+                try:
+                    firebase_send_password_reset(username)
+                except FirebaseError as e:
+                    write_error_log(f"(password reset failed for {username})\n{e}\n")
+                    message = e.friendly
+                    self.root.after(0, lambda: error_var.set(message))
+                    return
+                self.root.after(0, lambda: error_var.set(
+                    "Sent. Check your email (and your spam folder) for the link."
+                ))
+
+            error_var.set("Sending…")
+            threading.Thread(target=work, daemon=True).start()
+
+        submit_button = ctk.CTkButton(
             password_row,
             text="→",
             font=F(16, "bold"),
@@ -1529,16 +1740,38 @@ class LauncherApp:
             height=LOGIN_FIELD_HEIGHT,
             width=LOGIN_BUTTON_WIDTH,
             # Deferred (see the fix/comment on _show_settings's
-            # apply_and_rebuild) since attempt_login destroys
+            # apply_and_rebuild) since a successful login destroys
             # login_screen, this button's own ancestor. The <Return>
             # binding below calls attempt_login directly since a root-
             # level key binding doesn't have this hazard.
             command=lambda: self.root.after(1, attempt_login),
-        ).pack(side="left")
+        )
+        submit_button.pack(side="left")
 
         ctk.CTkLabel(
-            inner, textvariable=error_var, font=F(11), text_color="#c0392b", fg_color=WHITE_BACKDROP
+            inner,
+            textvariable=error_var,
+            font=F(11),
+            text_color="#c0392b",
+            fg_color=WHITE_BACKDROP,
+            wraplength=LOGIN_FIELD_WIDTH,
+            justify="left",
         ).pack(pady=(8, 0))
+
+        # No password is ever handed out -- this is how everyone gets in
+        # the first time, and how they recover a forgotten one.
+        ctk.CTkButton(
+            inner,
+            text="Forgot password?",
+            font=F(11),
+            fg_color="transparent",
+            hover_color=LOGIN_ACCENT_SOFT,
+            text_color=ACCENT,
+            border_width=0,
+            corner_radius=6,
+            height=24,
+            command=forgot_password,
+        ).pack(pady=(6, 0))
 
         self.root.bind("<Return>", attempt_login)
         (password_entry if remembered_username else username_entry).focus_set()
@@ -1913,24 +2146,41 @@ class LauncherApp:
         self._apply_sidebar_state()
 
     def _sync_shared_preferences(self):
-        """Pushes the signed-in person's current preferences out to
-        shared_preferences.json (see SHARED_PREFS_FILE), so a change
-        made here shows up the next time they log in on a different
-        computer that shares this same app folder. A no-op for
-        emergency shared logins (no current_user)."""
-        if self.current_user is None:
+        """Pushes the signed-in person's display preferences up to their
+        own row in the shared database, so a change made on this
+        computer shows up on every other one -- and on the mobile site --
+        the next time they sign in.
+
+        Done on a background thread and deliberately silent about
+        failures: this is a preference, not data anyone typed. If the
+        network is briefly down, the setting still applies locally for
+        this session and simply doesn't travel; nobody should get an
+        error popup for changing their text size."""
+        if self.current_user is None or not getattr(self, "id_token", ""):
             return
-        save_shared_preference(self.current_user["email"], self.current_user.get("preferences", {}))
+        email = self.current_user["email"]
+        preferences = {
+            key: self.settings.get(key) for key in PERSONAL_SETTING_KEYS
+        }
+        self.current_user["preferences"] = preferences
+        token = self.id_token
+
+        def work():
+            try:
+                firestore_save_preferences(token, email, preferences)
+            except Exception:
+                write_error_log(
+                    f"(couldn't sync preferences for {email})\n{traceback.format_exc()}"
+                )
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _toggle_sidebar(self):
         self._sidebar_expanded = not self._sidebar_expanded
         self._animate_sidebar(self._sidebar_expanded)
         self.settings["sidebar_expanded"] = self._sidebar_expanded
         save_settings(self.settings)
-        if self.current_user is not None:
-            self.current_user.setdefault("preferences", {})["sidebar_expanded"] = self._sidebar_expanded
-            save_users(self.users)
-            self._sync_shared_preferences()
+        self._sync_shared_preferences()
 
     def _apply_sidebar_state(self):
         """Instantly applies self._sidebar_expanded to the already-built
@@ -2814,20 +3064,21 @@ class LauncherApp:
             ).pack(anchor="w")
 
     def _show_team(self):
-        """Admin/Director only — reached from a button in Settings. A
-        roster of every real person with access: name, email, role, and
-        password (blurred behind a Show/Hide toggle). Admin or Director
-        can reveal or change anyone's password, promote a Staff member
-        to Admin or demote an Admin back to Staff, remove a Staff or
-        Admin's access entirely, or add a new person — Director rows
-        themselves aren't deletable/demotable from here, only viewable
-        and password-changeable, since managing peers wasn't asked for.
+        """Admin/Director only — reached from a button in Settings. The
+        roster of everyone with access, read live from the shared
+        database, so it's the same list on every computer and on the
+        mobile site.
 
-        Reveal and the inline "Change Password" editor are pure local
-        widget toggles (pack/pack_forget, label text) with no data
-        change, so they don't redraw anything. Anything that actually
-        edits self.users (add, save password, promote/demote, remove)
-        saves to users.json and then redraws via
+        Notably absent compared to the old file-backed version: showing
+        or setting someone else's password. Passwords now live in
+        Firebase Authentication, which stores them hashed and will not
+        hand them back to anybody -- not to this app, not to a Director,
+        not to Firebase's own console. That's the point of hashing. So
+        instead of a Show/Change control that couldn't work, each person
+        has "Send Reset Email", which mails them a link to set their
+        own.
+
+        Anything that changes data redraws via
         self.root.after(1, self._show_team) — deferred for the same
         reason documented on _sign_out/apply_and_rebuild: these buttons
         sit on cards a redraw would otherwise destroy synchronously out
@@ -2866,7 +3117,10 @@ class LauncherApp:
         ).pack(anchor="w")
         ctk.CTkLabel(
             scroll,
-            text="Everyone with access to this app — visible to Admin and Director.",
+            text=(
+                "Everyone with access, shared across every computer and the "
+                "mobile site. Visible to Admin and Director."
+            ),
             font=F(12),
             text_color=TEXT_MUTED,
             fg_color=BODY_BG,
@@ -2879,7 +3133,20 @@ class LauncherApp:
         add_inner.pack(fill="x", padx=18, pady=16)
 
         ctk.CTkLabel(
-            add_inner, text="Add Person", font=F(13, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
+            add_inner, text="Add or Update Person", font=F(13, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
+        ).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(
+            add_inner,
+            text=(
+                "Sets someone's name and role. Their sign-in itself is created "
+                "once in the Firebase console (Authentication → Add user); after "
+                "that they use “Forgot password?” to choose their own password."
+            ),
+            font=F(11),
+            text_color=TEXT_MUTED,
+            fg_color=CARD_BG,
+            wraplength=560,
+            justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
         add_row = ctk.CTkFrame(add_inner, fg_color=CARD_BG)
@@ -2887,17 +3154,10 @@ class LauncherApp:
 
         add_name_var = StringVar()
         add_email_var = StringVar()
-        add_password_var = StringVar()
         role_by_label = {v: k for k, v in ROLE_LABELS.items()}
         add_role_var = StringVar(value=ROLE_LABELS["staff"])
         add_status_var = StringVar()
 
-        # Each field gets its own small grey caption above it (Name /
-        # Email / Password / Role) rather than relying on placeholder
-        # text alone to convey what goes where -- and Role is a real
-        # dropdown (CTkOptionMenu), not a text box, with an accent-
-        # colored button segment so it's unmistakably a dropdown rather
-        # than looking like just another empty entry.
         def field_group(label_text):
             group = ctk.CTkFrame(add_row, fg_color=CARD_BG)
             group.pack(side="left", padx=(0, 10))
@@ -2906,18 +3166,16 @@ class LauncherApp:
             ).pack(anchor="w", pady=(0, 3))
             return group
 
-        def add_field(label_text, var, placeholder, width, mask=False):
+        def add_field(label_text, var, placeholder, width):
             group = field_group(label_text)
             ctk.CTkEntry(
                 group, textvariable=var, placeholder_text=placeholder, font=F(12),
                 height=32, corner_radius=8, width=width, fg_color=BODY_BG,
                 border_color=BORDER, text_color=TEXT_DARK, placeholder_text_color=TEXT_MUTED,
-                show=("•" if mask else ""),
             ).pack()
 
-        add_field("Name", add_name_var, "Full name", 150)
-        add_field("Email", add_email_var, f"name@{ALLOWED_EMAIL_DOMAIN}", 190)
-        add_field("Password", add_password_var, "Password", 130, mask=True)
+        add_field("Name", add_name_var, "Full name", 170)
+        add_field("Email", add_email_var, f"name@{ALLOWED_EMAIL_DOMAIN}", 210)
 
         role_group = field_group("Role")
         # CTkOptionMenu has no border_width/border_color of its own (unlike
@@ -2949,28 +3207,29 @@ class LauncherApp:
         def add_person():
             name = add_name_var.get().strip()
             email = add_email_var.get().strip().lower()
-            password = add_password_var.get()
             role = role_by_label.get(add_role_var.get(), "staff")
-            if not name or not email or not password:
-                add_status_var.set("Fill in name, email, and password.")
+            if not name or not email:
+                add_status_var.set("Fill in both a name and an email.")
                 add_status_label.configure(text_color="#c0392b")
-            elif not email.endswith("@" + ALLOWED_EMAIL_DOMAIN):
+                return
+            if not email.endswith("@" + ALLOWED_EMAIL_DOMAIN):
                 add_status_var.set(f"Email must be a @{ALLOWED_EMAIL_DOMAIN} address.")
                 add_status_label.configure(text_color="#c0392b")
-            elif any(u["email"] == email for u in self.users):
-                add_status_var.set("Someone with that email is already on the list.")
-                add_status_label.configure(text_color="#c0392b")
-            else:
-                self.users.append({
-                    "name": name, "email": email, "password": password, "role": role,
-                    "preferences": {},
-                })
-                save_users(self.users)
-                self.root.after(1, self._show_team)
+                return
+
+            add_status_var.set("Saving…")
+            add_status_label.configure(text_color=TEXT_MUTED)
+            self._run_team_write(
+                lambda token: firestore_save_profile(token, email, name, role),
+                on_error=lambda message: (
+                    add_status_var.set(message),
+                    add_status_label.configure(text_color="#c0392b"),
+                ),
+            )
 
         ctk.CTkButton(
             add_inner,
-            text="Add Person",
+            text="Save",
             font=F(12, "bold"),
             fg_color=ACCENT,
             hover_color=TEXT_DARK,
@@ -2982,177 +3241,189 @@ class LauncherApp:
         add_status_label.pack(anchor="w")
 
         # ------------------------------------------------------ roster --
-        if not self.users:
-            ctk.CTkLabel(
-                scroll,
-                text="Nobody's been added yet — use Add Person above.",
-                font=F(12),
-                text_color=TEXT_MUTED,
-                fg_color=BODY_BG,
-            ).pack(anchor="w")
-            return
+        # Fetched on a background thread so a slow connection doesn't
+        # freeze the window; the placeholder is replaced once it lands.
+        roster_holder = ctk.CTkFrame(scroll, fg_color=BODY_BG)
+        roster_holder.pack(fill="x")
+        loading_label = ctk.CTkLabel(
+            roster_holder, text="Loading the team…", font=F(12), text_color=TEXT_MUTED, fg_color=BODY_BG
+        )
+        loading_label.pack(anchor="w")
 
-        for user in sorted(self.users, key=lambda u: u["name"].lower()):
-            # A fresh dict per person, referenced by every closure below
-            # via a default arg (state=row_state) -- this is what keeps
-            # each row's buttons wired to *that row's* widgets instead of
-            # all silently ending up bound to the last row built, which
-            # is the classic Python closure-in-a-loop trap.
-            row_state = {"pw_shown": False, "editor_open": False}
+        def render_roster(people):
+            if not roster_holder.winfo_exists():
+                return  # navigated away while the request was in flight
+            loading_label.destroy()
+            if not people:
+                ctk.CTkLabel(
+                    roster_holder,
+                    text="Nobody has a profile yet — use Add or Update Person above.",
+                    font=F(12),
+                    text_color=TEXT_MUTED,
+                    fg_color=BODY_BG,
+                ).pack(anchor="w")
+                return
 
-            card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
-            card.pack(fill="x", pady=8)
-            inner = ctk.CTkFrame(card, fg_color=CARD_BG)
-            inner.pack(fill="x", padx=18, pady=16)
+            for person in people:
+                card = ctk.CTkFrame(
+                    roster_holder, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER
+                )
+                card.pack(fill="x", pady=8)
+                inner = ctk.CTkFrame(card, fg_color=CARD_BG)
+                inner.pack(fill="x", padx=18, pady=16)
 
-            top_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
-            top_row.pack(fill="x")
-            ctk.CTkLabel(
-                top_row, text=user["name"], font=F(14, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG, anchor="w"
-            ).pack(side="left")
-            badge = ctk.CTkFrame(top_row, fg_color=ACCENT_SOFT, corner_radius=6)
-            badge.pack(side="left", padx=(10, 0))
-            ctk.CTkLabel(
-                badge, text=ROLE_LABELS[user["role"]], font=F(10, "bold"), text_color=ACCENT, fg_color=ACCENT_SOFT
-            ).pack(padx=8, pady=2)
+                top_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
+                top_row.pack(fill="x")
+                ctk.CTkLabel(
+                    top_row, text=person["name"], font=F(14, "bold"),
+                    text_color=TEXT_DARK, fg_color=CARD_BG, anchor="w",
+                ).pack(side="left")
+                badge = ctk.CTkFrame(top_row, fg_color=ACCENT_SOFT, corner_radius=6)
+                badge.pack(side="left", padx=(10, 0))
+                ctk.CTkLabel(
+                    badge, text=ROLE_LABELS[person["role"]], font=F(10, "bold"),
+                    text_color=ACCENT, fg_color=ACCENT_SOFT,
+                ).pack(padx=8, pady=2)
 
-            if user["role"] != "director":
-                def remove_person(email=user["email"], name=user["name"]):
-                    if messagebox.askyesno(
-                        WINDOW_TITLE, f"Remove {name}'s access? They won't be able to sign in anymore."
-                    ):
-                        self.users = [u for u in self.users if u["email"] != email]
-                        save_users(self.users)
-                        self.root.after(1, self._show_team)
+                # Director rows stay non-removable, as before -- managing
+                # peers wasn't asked for, and it prevents the last
+                # Director accidentally removing their own access and
+                # leaving nobody able to manage the team at all.
+                if person["role"] != "director":
+                    def remove_person(email=person["email"], name=person["name"]):
+                        if not messagebox.askyesno(
+                            WINDOW_TITLE,
+                            f"Remove {name}'s access? They won't be able to sign in "
+                            "on any computer or on the mobile site.",
+                        ):
+                            return
+                        self._run_team_write(lambda token: firestore_delete_profile(token, email))
+
+                    ctk.CTkButton(
+                        top_row,
+                        text="Remove Access",
+                        font=F(11),
+                        fg_color="transparent",
+                        hover_color=BORDER,
+                        text_color="#c0392b",
+                        border_width=1,
+                        border_color=BORDER,
+                        corner_radius=8,
+                        height=26,
+                        command=remove_person,
+                    ).pack(side="right")
+
+                ctk.CTkLabel(
+                    inner, text=person["email"], font=F(12), text_color=TEXT_MUTED, fg_color=CARD_BG
+                ).pack(anchor="w", pady=(4, 10))
+
+                actions = ctk.CTkFrame(inner, fg_color=CARD_BG)
+                actions.pack(fill="x")
+
+                # ---- password reset (no reveal -- see the docstring) --
+                reset_status_var = StringVar()
+
+                def send_reset(email=person["email"], status_var=reset_status_var):
+                    status_var.set("Sending…")
+
+                    def work():
+                        try:
+                            firebase_send_password_reset(email)
+                        except FirebaseError as e:
+                            write_error_log(f"(reset email failed for {email})\n{e}\n")
+                            message = e.friendly
+                            self.root.after(0, lambda: status_var.set(message))
+                            return
+                        self.root.after(0, lambda: status_var.set("Sent — they'll get an email."))
+
+                    threading.Thread(target=work, daemon=True).start()
 
                 ctk.CTkButton(
-                    top_row,
-                    text="Remove Access",
+                    actions,
+                    text="Send Reset Email",
                     font=F(11),
                     fg_color="transparent",
                     hover_color=BORDER,
-                    text_color="#c0392b",
+                    text_color=ACCENT,
                     border_width=1,
                     border_color=BORDER,
-                    corner_radius=8,
-                    height=26,
-                    command=remove_person,
-                ).pack(side="right")
-
-            ctk.CTkLabel(
-                inner, text=user["email"], font=F(12), text_color=TEXT_MUTED, fg_color=CARD_BG
-            ).pack(anchor="w", pady=(4, 10))
-
-            # ---- password: hidden by default, revealed via Show/Hide --
-            pw_row = ctk.CTkFrame(inner, fg_color=CARD_BG)
-            pw_row.pack(fill="x")
-            pw_display_var = StringVar(value="•" * max(8, len(user["password"])))
-            ctk.CTkLabel(
-                pw_row, textvariable=pw_display_var, font=F(12, "bold"), text_color=TEXT_DARK, fg_color=CARD_BG
-            ).pack(side="left")
-
-            def toggle_password(pw=user["password"], display_var=pw_display_var, state=row_state):
-                state["pw_shown"] = not state["pw_shown"]
-                display_var.set(pw if state["pw_shown"] else "•" * max(8, len(pw)))
-                state["reveal_btn"].configure(text=("Hide" if state["pw_shown"] else "Show"))
-
-            reveal_btn = ctk.CTkButton(
-                pw_row, text="Show", font=F(11), fg_color="transparent", hover_color=BORDER,
-                text_color=ACCENT, border_width=0, corner_radius=6, height=24, width=50,
-                command=toggle_password,
-            )
-            row_state["reveal_btn"] = reveal_btn
-            reveal_btn.pack(side="left", padx=(10, 0))
-
-            # ---- change password: collapsed inline editor --
-            def toggle_editor(state=row_state):
-                state["editor_open"] = not state["editor_open"]
-                if state["editor_open"]:
-                    state["editor_frame"].pack(fill="x", pady=(10, 0))
-                else:
-                    state["editor_frame"].pack_forget()
-                state["change_pw_btn"].configure(text=("Cancel" if state["editor_open"] else "Change Password"))
-
-            change_pw_btn = ctk.CTkButton(
-                pw_row, text="Change Password", font=F(11), fg_color="transparent", hover_color=BORDER,
-                text_color=TEXT_MUTED, border_width=1, border_color=BORDER, corner_radius=6, height=24,
-                command=toggle_editor,
-            )
-            row_state["change_pw_btn"] = change_pw_btn
-            change_pw_btn.pack(side="right")
-
-            editor_frame = ctk.CTkFrame(inner, fg_color=CARD_BG)
-            row_state["editor_frame"] = editor_frame
-            # Not packed yet — toggle_editor packs it on demand.
-
-            new_pw_var = StringVar()
-            confirm_pw_var = StringVar()
-            editor_status_var = StringVar()
-
-            def editor_field(var, placeholder):
-                return ctk.CTkEntry(
-                    editor_frame, textvariable=var, placeholder_text=placeholder, show="•", font=F(12),
-                    height=32, corner_radius=8, width=180, fg_color=BODY_BG, border_color=BORDER,
-                    text_color=TEXT_DARK,
-                )
-
-            editor_row = ctk.CTkFrame(editor_frame, fg_color=CARD_BG)
-            editor_row.pack(fill="x")
-            editor_field(new_pw_var, "New password").pack(side="left", padx=(0, 8))
-            editor_field(confirm_pw_var, "Confirm new password").pack(side="left", padx=(0, 8))
-
-            editor_status_label = ctk.CTkLabel(
-                editor_frame, textvariable=editor_status_var, font=F(11), text_color=TEXT_MUTED, fg_color=CARD_BG
-            )
-
-            def save_password(email=user["email"], new_var=new_pw_var, confirm_var=confirm_pw_var,
-                               status_var=editor_status_var, status_label=editor_status_label):
-                new = new_var.get()
-                confirm = confirm_var.get()
-                if not new:
-                    status_var.set("Enter a new password.")
-                    status_label.configure(text_color="#c0392b")
-                elif new != confirm:
-                    status_var.set("New password and confirmation don't match.")
-                    status_label.configure(text_color="#c0392b")
-                else:
-                    for u in self.users:
-                        if u["email"] == email:
-                            u["password"] = new
-                            break
-                    save_users(self.users)
-                    self.root.after(1, self._show_team)
-
-            ctk.CTkButton(
-                editor_row, text="Save", font=F(11, "bold"), fg_color=ACCENT, hover_color=TEXT_DARK,
-                text_color="white", corner_radius=8, height=32, width=70, command=save_password,
-            ).pack(side="left")
-            editor_status_label.pack(anchor="w", pady=(6, 0))
-
-            # ---- promote / demote (staff <-> admin only) --
-            if user["role"] in ("staff", "admin"):
-                def toggle_role(email=user["email"], current_role=user["role"]):
-                    new_role = "admin" if current_role == "staff" else "staff"
-                    for u in self.users:
-                        if u["email"] == email:
-                            u["role"] = new_role
-                            break
-                    save_users(self.users)
-                    self.root.after(1, self._show_team)
-
-                ctk.CTkButton(
-                    inner,
-                    text=("Promote to Admin" if user["role"] == "staff" else "Demote to Staff"),
-                    font=F(11, "bold"),
-                    fg_color="transparent",
-                    hover_color=TEXT_DARK,
-                    text_color=ACCENT,
-                    border_width=0,
                     corner_radius=6,
-                    height=24,
-                    anchor="w",
-                    command=toggle_role,
-                ).pack(anchor="w", pady=(10, 0))
+                    height=26,
+                    command=send_reset,
+                ).pack(side="left")
+
+                ctk.CTkLabel(
+                    actions, textvariable=reset_status_var, font=F(11),
+                    text_color=TEXT_MUTED, fg_color=CARD_BG,
+                ).pack(side="left", padx=(10, 0))
+
+                # ---- promote / demote (staff <-> admin only) --
+                if person["role"] in ("staff", "admin"):
+                    def toggle_role(email=person["email"], name=person["name"], current_role=person["role"]):
+                        new_role = "admin" if current_role == "staff" else "staff"
+                        self._run_team_write(
+                            lambda token: firestore_save_profile(token, email, name, new_role)
+                        )
+
+                    ctk.CTkButton(
+                        inner,
+                        text=("Promote to Admin" if person["role"] == "staff" else "Demote to Staff"),
+                        font=F(11, "bold"),
+                        fg_color="transparent",
+                        hover_color=TEXT_DARK,
+                        text_color=ACCENT,
+                        border_width=0,
+                        corner_radius=6,
+                        height=24,
+                        anchor="w",
+                        command=toggle_role,
+                    ).pack(anchor="w", pady=(10, 0))
+
+        def load_roster():
+            try:
+                people = firestore_list_profiles(self.id_token)
+            except FirebaseError as e:
+                write_error_log(f"(couldn't load the team roster)\n{e}\n")
+                message = e.friendly
+                self.root.after(0, lambda: (
+                    loading_label.winfo_exists()
+                    and loading_label.configure(text=message, text_color="#c0392b")
+                ))
+                return
+            self.root.after(0, lambda: render_roster(people))
+
+        threading.Thread(target=load_roster, daemon=True).start()
+
+    def _run_team_write(self, action, on_error=None):
+        """Runs a Team-page write (add/update/remove) against the shared
+        database off the UI thread, then redraws the page so everyone
+        sees the result. firestore.rules enforces Admin/Director on the
+        server side too, so a permissions error here is reported rather
+        than assumed impossible."""
+        token = getattr(self, "id_token", "")
+        if not token:
+            return
+
+        def work():
+            try:
+                action(token)
+            except FirebaseError as e:
+                write_error_log(f"(team change failed)\n{e}\n")
+                message = e.friendly
+                if on_error is not None:
+                    self.root.after(0, lambda: on_error(message))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror(WINDOW_TITLE, message))
+                return
+            except Exception:
+                write_error_log(f"(unexpected team change error)\n{traceback.format_exc()}")
+                self.root.after(0, lambda: messagebox.showerror(
+                    WINDOW_TITLE, "Something went wrong. Details in error_log.txt."
+                ))
+                return
+            self.root.after(1, self._show_team)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _show_settings(self):
         """Personal display preferences. If you're logged in as a real
@@ -3209,13 +3480,10 @@ class LauncherApp:
         def apply_and_rebuild(key, value):
             self.settings[key] = value
             save_settings(self.settings)
-            if self.current_user is not None and key in PERSONAL_SETTING_KEYS:
-                # Signed in as a real person -- this choice is theirs,
-                # not just this device's, so it's saved to their own
-                # record too. It'll win over whatever's in settings.json
-                # the next time they (or anyone else) logs in.
-                self.current_user.setdefault("preferences", {})[key] = value
-                save_users(self.users)
+            if key in PERSONAL_SETTING_KEYS:
+                # This choice belongs to the person, not the computer,
+                # so it goes up to their row in the shared database and
+                # follows them to any other machine or the mobile site.
                 self._sync_shared_preferences()
             if key == "theme":
                 apply_theme(value)
@@ -3325,27 +3593,61 @@ class LauncherApp:
                 current_pw = current_pw_var.get()
                 new_pw = new_pw_var.get()
                 confirm_pw = confirm_pw_var.get()
-                if self.current_user.get("password") != current_pw:
-                    pw_status_var.set("Current password is incorrect.")
+
+                if not current_pw:
+                    pw_status_var.set("Enter your current password.")
                     pw_status_label.configure(text_color="#c0392b")
-                elif not new_pw:
-                    pw_status_var.set("Enter a new password.")
+                    return
+                if len(new_pw) < 6:
+                    pw_status_var.set("New password must be at least 6 characters.")
                     pw_status_label.configure(text_color="#c0392b")
-                elif new_pw != confirm_pw:
+                    return
+                if new_pw != confirm_pw:
                     pw_status_var.set("New password and confirmation don't match.")
                     pw_status_label.configure(text_color="#c0392b")
-                else:
-                    # self.current_user is the very same dict object that
-                    # lives inside self.users (matched by reference at
-                    # login, see attempt_login) — updating it in place is
-                    # enough for save_users() to persist the change too.
-                    self.current_user["password"] = new_pw
-                    save_users(self.users)
-                    current_pw_var.set("")
-                    new_pw_var.set("")
-                    confirm_pw_var.set("")
-                    pw_status_var.set("Password changed.")
-                    pw_status_label.configure(text_color=TEXT_MUTED)
+                    return
+
+                pw_status_var.set("Changing…")
+                pw_status_label.configure(text_color=TEXT_MUTED)
+
+                def work():
+                    """Re-signs in with the current password first. That's
+                    what verifies the person typing actually knows it --
+                    the app can't compare it to a stored copy, because
+                    passwords live hashed in Firebase and nothing here
+                    ever holds one. It also refreshes the token, since
+                    Firebase requires a recent sign-in before allowing a
+                    password change."""
+                    try:
+                        session = firebase_sign_in(self.current_user["email"], current_pw)
+                    except FirebaseError:
+                        self.root.after(0, lambda: (
+                            pw_status_var.set("Current password is incorrect."),
+                            pw_status_label.configure(text_color="#c0392b"),
+                        ))
+                        return
+                    try:
+                        new_token = firebase_change_own_password(session["idToken"], new_pw)
+                    except FirebaseError as e:
+                        write_error_log(f"(password change failed)\n{e}\n")
+                        message = e.friendly
+                        self.root.after(0, lambda: (
+                            pw_status_var.set(message),
+                            pw_status_label.configure(text_color="#c0392b"),
+                        ))
+                        return
+
+                    def done():
+                        self.id_token = new_token
+                        current_pw_var.set("")
+                        new_pw_var.set("")
+                        confirm_pw_var.set("")
+                        pw_status_var.set("Password changed. Use it everywhere, including the mobile site.")
+                        pw_status_label.configure(text_color=TEXT_MUTED)
+
+                    self.root.after(0, done)
+
+                threading.Thread(target=work, daemon=True).start()
 
             ctk.CTkButton(
                 pw_inner,
@@ -3462,24 +3764,14 @@ class LauncherApp:
         this doesn't touch at all — that's managed entirely from the
         Team page."""
         keep_username = self.settings.get("last_username", "")
-        keep_staff_password = self.settings.get("staff_password", STAFF_PASSWORD)
-        keep_admin_password = self.settings.get("admin_password", ADMIN_PASSWORD)
-        keep_director_password = self.settings.get("director_password", DIRECTOR_PASSWORD)
         self.settings = dict(DEFAULT_SETTINGS)
         self.settings["last_username"] = keep_username
-        self.settings["staff_password"] = keep_staff_password
-        self.settings["admin_password"] = keep_admin_password
-        self.settings["director_password"] = keep_director_password
         save_settings(self.settings)
-        if self.current_user is not None:
-            # Same "never touches passwords" rule, applied to this
-            # person's own record instead of settings.json: clear their
-            # saved display preferences so they go back to the defaults
-            # above too, rather than reset appearing to work here and
-            # then silently reverting the next time they log back in.
-            self.current_user["preferences"] = {}
-            save_users(self.users)
-            self._sync_shared_preferences()
+        # Push the restored defaults up to this person's row in the
+        # shared database too, rather than the reset appearing to work
+        # here and then silently reverting the next time they sign in
+        # on this or any other computer.
+        self._sync_shared_preferences()
         apply_theme(self.settings["theme"])
         apply_font_scale(self.settings["font_scale"])
         self._sidebar_expanded = self.settings["sidebar_expanded"]
