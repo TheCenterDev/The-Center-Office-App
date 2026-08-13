@@ -68,6 +68,44 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && hasProfile();
     }
 
+    // Notes. Three kinds, distinguished by the visibility field:
+    //   "private" -- only the author, including not Admin/Director
+    //   "team"    -- anyone signed in with a profile
+    //   "direct"  -- the author plus the people named in recipients
+    //
+    // This is the actual enforcement. The Notes page decides what to
+    // display, but a private note cannot be fetched by anyone else
+    // however they ask, because read is denied here.
+    //
+    // Note the deliberate absence of an Admin/Director override: people
+    // only use a private notes feature if private means private. A
+    // Director who genuinely needs a note can still reach it through the
+    // Firebase console, which is a visible, deliberate act rather than a
+    // silent capability inside the app.
+    //
+    // The update rule lets a recipient add themselves to readBy and
+    // change nothing else, so being sent a note doesn't grant the power
+    // to rewrite it.
+    match /notes/{noteId} {
+      allow read: if isSignedIn() && hasProfile() && (
+        resource.data.author == emailKey() ||
+        resource.data.visibility == 'team' ||
+        emailKey() in resource.data.recipients
+      );
+
+      allow create: if isSignedIn() && hasProfile() &&
+        request.resource.data.author == emailKey();
+
+      allow update: if isSignedIn() && hasProfile() && (
+        resource.data.author == emailKey() || (
+          emailKey() in resource.data.recipients &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy'])
+        )
+      );
+
+      allow delete: if isSignedIn() && resource.data.author == emailKey();
+    }
+
     // The recurring reporting calendar (JDAI, surveys, year-end
     // close-out, and the ended-but-kept CCLC cycle). Everyone reads it;
     // Admin/Director change it, since it defines obligations for the

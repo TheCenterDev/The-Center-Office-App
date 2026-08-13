@@ -196,6 +196,106 @@
     return page("");
   }
 
+  /* Firestore security rules are a permission check, not a filter. A
+   * plain "list this collection" is refused outright if even one
+   * document in it isn't readable by you -- which is exactly the case
+   * for notes, where most documents belong to other people. The way to
+   * read only what you're allowed is to ask a question narrow enough
+   * that the rules can approve it, e.g. "notes where author is me".
+   * That's what this does. */
+  function queryCollection(collection, field, op, value) {
+    var body = {
+      structuredQuery: {
+        from: [{ collectionId: collection }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: field },
+            op: op,
+            value: toValue(value),
+          },
+        },
+        limit: 500,
+      },
+    };
+    return getToken().then(function (token) {
+      return fetch(FIRESTORE + ":runQuery", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    }).then(function (response) {
+      if (!response.ok) {
+        return response.text().then(function (text) {
+          var message = "";
+          try { message = JSON.parse(text).error.message; } catch (e) { message = text; }
+          throw new Error(message || ("Query failed (" + response.status + ")"));
+        });
+      }
+      return response.json();
+    }).then(function (rows) {
+      var out = [];
+      (rows || []).forEach(function (row) {
+        // Rows without a document are read-time markers, not results.
+        if (!row.document) return;
+        var data = fromFields(row.document.fields || {});
+        data.id = row.document.name.split("/").pop();
+        out.push(data);
+      });
+      return out;
+    });
+  }
+
+  /** Runs several queries and merges them, de-duplicated by id -- a note
+   *  can match more than one (your own note addressed to someone else
+   *  comes back from both "mine" and "addressed to them"). */
+  function queryUnion(queries) {
+    return Promise.all(queries.map(function (q) {
+      return queryCollection(q.collection, q.field, q.op, q.value);
+    })).then(function (results) {
+      var seen = {};
+      var merged = [];
+      results.forEach(function (rows) {
+        rows.forEach(function (row) {
+          if (seen[row.id]) return;
+          seen[row.id] = true;
+          merged.push(row);
+        });
+      });
+      return merged;
+    });
+  }
+
+  function watchQueryUnion(queries, onData, onError) {
+    var stopped = false;
+    var timer = null;
+    var lastSerialised = null;
+
+    function tick() {
+      if (stopped) return;
+      queryUnion(queries).then(function (rows) {
+        if (stopped) return;
+        var serialised = JSON.stringify(rows);
+        if (serialised !== lastSerialised) {
+          lastSerialised = serialised;
+          onData(rows);
+        }
+      }).catch(function (err) {
+        if (!stopped && onError) onError(err);
+      }).then(function () {
+        if (!stopped) timer = setTimeout(tick, POLL_MS);
+      });
+    }
+
+    tick();
+    return function stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }
+
   function setDoc(collection, id, data, options) {
     var merge = options && options.merge;
     var path = "/" + collection + "/" + encodeURIComponent(id);
@@ -287,6 +387,9 @@
     getToken: getToken,
     getDoc: getDoc,
     listCollection: listCollection,
+    queryCollection: queryCollection,
+    queryUnion: queryUnion,
+    watchQueryUnion: watchQueryUnion,
     setDoc: setDoc,
     deleteDoc: deleteDoc,
     watchCollection: watchCollection,

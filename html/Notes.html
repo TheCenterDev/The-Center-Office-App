@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notes</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+
+  input[type=text], input[type=email], input[type=password], textarea, select {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line);
+    border-radius: 8px; outline: none; width: 100%; background: #fff; color: var(--ink);
+  }
+  textarea { min-height: 90px; resize: vertical; line-height: 1.5; }
+  input:focus, textarea:focus, select:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
+  .primary { background: var(--blue); color: #fff; }
+  .primary:disabled { background: #b9c4dd; cursor: not-allowed; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .tabs button.on { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .count { display: inline-block; background: var(--red); color: #fff; font-size: 11px;
+           font-weight: 700; border-radius: 999px; padding: 1px 7px; margin-left: 6px; }
+  .tabs button.on .count { background: #fff; color: var(--blue); }
+
+  .note { border-bottom: 1px solid var(--line); padding: 14px 0; }
+  .note:last-child { border-bottom: none; }
+  .note h3 { font-size: 15.5px; margin-bottom: 3px; }
+  .note .body { font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; margin-top: 4px; }
+  .note .meta { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .note.unread { background: #fbfcff; margin: 0 -20px; padding: 14px 20px; border-left: 3px solid var(--blue); }
+  .note .actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .note .actions button { padding: 5px 12px; font-size: 12.5px; }
+
+  .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+  .pill.team { background: var(--green-bg); color: var(--green); }
+  .pill.direct { background: #e8eeff; color: var(--blue); }
+  .pill.mine { background: #eef0f4; color: var(--muted); }
+  .pill.new { background: var(--red-bg); color: var(--red); }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .row > label { font-size: 12.5px; font-weight: 700; color: var(--muted); }
+  .people { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .people label { font-size: 13px; display: flex; align-items: center; gap: 5px;
+                  border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; cursor: pointer; }
+  .people input { width: auto; }
+
+  .empty { text-align: center; color: var(--muted); padding: 36px 20px; font-size: 14px; }
+  .note-privacy { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+
+  .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+  .topbar button { padding: 5px 10px; font-size: 12.5px; }
+
+  #authGate { max-width: 360px; margin: 60px auto; }
+  #authGate .card { text-align: center; }
+  #authGate label { text-align: left; display: block; margin-top: 10px; font-size: 13px; }
+  #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
+  #appArea { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Notes</h1>
+  <p class="sub">Your own notes, notes for the whole team, and notes left for specific people.</p>
+
+  <div id="authGate">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="sub" style="margin-bottom: 14px;">Same account as the app and the mobile site.</p>
+      <form id="authForm">
+        <label>Email</label>
+        <input type="email" id="authEmail" autocomplete="username" required>
+        <label>Password</label>
+        <input type="password" id="authPassword" autocomplete="current-password" required>
+        <div id="authError"></div>
+        <button class="primary" type="submit" style="width:100%; margin-top:14px;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="appArea">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button class="ghost" id="signOutBtn" type="button">Sign out</button>
+    </div>
+
+    <div class="card">
+      <div class="row"><label>New note</label></div>
+      <input type="text" id="noteTitle" placeholder="Title" style="margin-bottom:8px;">
+      <textarea id="noteBody" placeholder="Write your note…"></textarea>
+      <div class="row" style="margin-top:10px;">
+        <label>Who can see it</label>
+        <select id="noteVisibility" style="width:auto; min-width:210px;">
+          <option value="private">Just me</option>
+          <option value="team">Everyone on the team</option>
+          <option value="direct">Specific people…</option>
+        </select>
+      </div>
+      <div id="peopleWrap" style="display:none;">
+        <div class="people" id="peopleList"></div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="primary" id="saveNoteBtn" type="button">Save note</button>
+        <span id="saveMsg" style="font-size:12.5px;color:var(--muted);"></span>
+      </div>
+      <div class="note-privacy" id="privacyNote"></div>
+    </div>
+
+    <div class="tabs" id="tabs"></div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="center-session.js"></script>
+<script>
+/* Notes live in the shared database, one document per note:
+ *   { title, body, author, authorName, visibility, recipients[],
+ *     readBy[], created, updated }
+ *
+ * visibility is one of:
+ *   "private" -- only the author
+ *   "team"    -- everyone signed in with a profile
+ *   "direct"  -- the author plus the people listed in recipients
+ *
+ * The privacy is enforced by firestore.rules on the server, not by this
+ * page: a private note simply cannot be fetched by anyone else, however
+ * they ask. What this page does is decide what to *show*.
+ *
+ * Because rules are a permission check rather than a filter, asking for
+ * "all notes" would be refused outright -- most notes belong to other
+ * people. Instead the page asks three narrow questions it's allowed to
+ * ask (mine / team / addressed to me) and merges the answers.
+ */
+firebase.initializeApp({
+  apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
+  authDomain: "the-center-office-app.firebaseapp.com",
+  projectId: "the-center-office-app",
+  storageBucket: "the-center-office-app.firebasestorage.app",
+  messagingSenderId: "282726386673",
+  appId: "1:282726386673:web:bdd0c91062a7ac2d0b9250",
+  measurementId: "G-GFVPF8N6ZF",
+});
+const auth = firebase.auth();
+
+let me = null;            // { email, name, role }
+let notes = [];
+let people = [];          // everyone with a profile, for the recipient picker
+let stopWatching = null;
+let tab = "inbox";
+
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function when(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const days = Math.round((new Date().setHours(0,0,0,0) - new Date(d).setHours(0,0,0,0)) / 86400000);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (days === 0) return "today at " + time;
+  if (days === 1) return "yesterday at " + time;
+  if (days < 7) return days + " days ago";
+  return d.toLocaleDateString();
+}
+
+// ------------------------------------------------------------ auth --
+
+function startApp(profile) {
+  me = {
+    email: (profile.email || "").trim().toLowerCase(),
+    name: profile.name || profile.email,
+    role: profile.role || "staff",
+  };
+  document.getElementById("whoami").textContent = "Signed in as " + me.name;
+  document.getElementById("authGate").style.display = "none";
+  document.getElementById("appArea").style.display = "block";
+  document.getElementById("privacyNote").textContent =
+    "“Just me” notes are hidden from everyone else here, including Directors. " +
+    "They are not hidden from whoever administers the database, so treat this as work " +
+    "scratch space rather than somewhere for anything genuinely confidential.";
+  loadPeople();
+  watch();
+}
+
+if (CenterSession.isHandedOver()) {
+  const signOut = document.getElementById("signOutBtn");
+  if (signOut) signOut.style.display = "none";
+  startApp(CenterSession.user());
+} else {
+  auth.onAuthStateChanged(user => {
+    if (stopWatching) { stopWatching(); stopWatching = null; }
+    if (!user) {
+      document.getElementById("authGate").style.display = "block";
+      document.getElementById("appArea").style.display = "none";
+      return;
+    }
+    CenterSession.getDoc("users", user.email.trim().toLowerCase()).then(profile => {
+      if (!profile) {
+        document.getElementById("authError").textContent =
+          "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you.";
+        return;
+      }
+      profile.email = user.email;
+      startApp(profile);
+    });
+  });
+}
+
+document.getElementById("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  document.getElementById("authError").textContent = "";
+  auth.signInWithEmailAndPassword(
+    document.getElementById("authEmail").value.trim(),
+    document.getElementById("authPassword").value
+  ).catch(err => { document.getElementById("authError").textContent = err.message; });
+});
+document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
+
+// ------------------------------------------------------------ data --
+
+function loadPeople() {
+  // Only Admin/Director may list everyone (see firestore.rules), so for
+  // staff this quietly fails and the picker falls back to typing an
+  // address by hand rather than showing an error for something that
+  // isn't broken.
+  CenterSession.listCollection("users").then(rows => {
+    people = rows
+      .map(r => ({ email: r.id, name: r.name || r.id }))
+      .filter(p => p.email !== me.email)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    renderPeople();
+  }).catch(() => {
+    people = null;
+    renderPeople();
+  });
+}
+
+function watch() {
+  stopWatching = CenterSession.watchQueryUnion([
+    { collection: "notes", field: "author",     op: "EQUAL",          value: me.email },
+    { collection: "notes", field: "visibility", op: "EQUAL",          value: "team" },
+    { collection: "notes", field: "recipients", op: "ARRAY_CONTAINS", value: me.email },
+  ], rows => {
+    notes = rows.sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
+    render();
+  }, err => {
+    document.getElementById("list").innerHTML =
+      '<div class="empty">Couldn\'t load notes: ' + esc(err.message) + "</div>";
+  });
+}
+
+// ----------------------------------------------------------- write --
+
+document.getElementById("noteVisibility").addEventListener("change", e => {
+  document.getElementById("peopleWrap").style.display = e.target.value === "direct" ? "" : "none";
+});
+
+function renderPeople() {
+  const wrap = document.getElementById("peopleList");
+  wrap.innerHTML = "";
+  if (people === null) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "manualRecipients";
+    input.placeholder = "Email addresses, separated by commas";
+    wrap.appendChild(input);
+    return;
+  }
+  people.forEach(p => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = p.email; cb.className = "recipient";
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(p.name));
+    wrap.appendChild(label);
+  });
+}
+
+function chosenRecipients() {
+  const manual = document.getElementById("manualRecipients");
+  if (manual) {
+    return manual.value.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  }
+  return Array.from(document.querySelectorAll(".recipient:checked")).map(cb => cb.value);
+}
+
+document.getElementById("saveNoteBtn").addEventListener("click", () => {
+  const title = document.getElementById("noteTitle").value.trim();
+  const body = document.getElementById("noteBody").value.trim();
+  const visibility = document.getElementById("noteVisibility").value;
+  const msg = document.getElementById("saveMsg");
+  const recipients = visibility === "direct" ? chosenRecipients() : [];
+
+  if (!title && !body) { msg.textContent = "Write something first."; return; }
+  if (visibility === "direct" && !recipients.length) {
+    msg.textContent = "Pick at least one person to leave this note for.";
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const id = "n" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  msg.textContent = "Saving…";
+
+  CenterSession.setDoc("notes", id, {
+    title: title || "(untitled)",
+    body: body,
+    author: me.email,
+    authorName: me.name,
+    visibility: visibility,
+    recipients: recipients,
+    // The author has obviously read their own note; this is what keeps
+    // it out of everyone's unread count including their own.
+    readBy: [me.email],
+    created: now,
+    updated: now,
+  }).then(() => {
+    document.getElementById("noteTitle").value = "";
+    document.getElementById("noteBody").value = "";
+    document.querySelectorAll(".recipient:checked").forEach(cb => { cb.checked = false; });
+    const manual = document.getElementById("manualRecipients");
+    if (manual) manual.value = "";
+    msg.textContent = "Saved.";
+    setTimeout(() => { msg.textContent = ""; }, 2500);
+  }).catch(err => { msg.textContent = "Couldn't save: " + err.message; });
+});
+
+function markRead(note) {
+  if ((note.readBy || []).indexOf(me.email) !== -1) return;
+  const readBy = (note.readBy || []).concat([me.email]);
+  // Only this field is written -- firestore.rules lets a recipient touch
+  // readBy and nothing else, so a note's text can't be altered by
+  // someone it was merely sent to.
+  CenterSession.setDoc("notes", note.id, { readBy }, { merge: true }).catch(() => {});
+}
+
+function deleteNote(note) {
+  if (!confirm("Delete this note? It'll be gone for everyone who could see it.")) return;
+  CenterSession.deleteDoc("notes", note.id).catch(err => alert("Couldn't delete: " + err.message));
+}
+
+// ---------------------------------------------------------- render --
+
+function isUnread(n) {
+  return n.author !== me.email && (n.readBy || []).indexOf(me.email) === -1;
+}
+function forMe(n) { return (n.recipients || []).indexOf(me.email) !== -1; }
+
+function render() {
+  const inbox = notes.filter(n => forMe(n) && n.author !== me.email);
+  const mine = notes.filter(n => n.author === me.email);
+  const team = notes.filter(n => n.visibility === "team");
+  const unread = notes.filter(isUnread).length;
+
+  const tabsEl = document.getElementById("tabs");
+  tabsEl.innerHTML = "";
+  [
+    ["inbox", "For me", inbox.filter(isUnread).length],
+    ["mine", "My notes", 0],
+    ["team", "Team", team.filter(isUnread).length],
+  ].forEach(([key, label, badge]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = key === tab ? "on" : "";
+    b.innerHTML = esc(label) + (badge ? '<span class="count">' + badge + "</span>" : "");
+    b.addEventListener("click", () => { tab = key; render(); });
+    tabsEl.appendChild(b);
+  });
+
+  document.title = unread ? "Notes (" + unread + ")" : "Notes";
+
+  const rows = tab === "inbox" ? inbox : tab === "mine" ? mine : team;
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  if (!rows.length) {
+    const messages = {
+      inbox: "Nothing left for you right now.",
+      mine: "You haven't written any notes yet.",
+      team: "No team notes yet.",
+    };
+    list.innerHTML = '<div class="empty">' + messages[tab] + "</div>";
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+
+  rows.forEach(n => {
+    const el = document.createElement("div");
+    el.className = "note" + (isUnread(n) ? " unread" : "");
+
+    let pill = "";
+    if (n.visibility === "team") pill = '<span class="pill team">Team</span>';
+    else if (n.visibility === "direct") {
+      pill = '<span class="pill direct">' +
+        (n.author === me.email ? "Sent" : "For you") + "</span>";
+    } else pill = '<span class="pill mine">Just me</span>';
+    if (isUnread(n)) pill += '<span class="pill new">new</span>';
+
+    let recipientLine = "";
+    if (n.visibility === "direct" && n.author === me.email) {
+      recipientLine = " · to " + esc((n.recipients || []).join(", "));
+    }
+
+    el.innerHTML =
+      "<h3>" + esc(n.title) + pill + "</h3>" +
+      '<div class="body">' + esc(n.body) + "</div>" +
+      '<div class="meta">' + esc(n.authorName || n.author) + " · " + esc(when(n.updated)) +
+      recipientLine + "</div>";
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    if (isUnread(n)) {
+      const read = document.createElement("button");
+      read.type = "button"; read.className = "ghost"; read.textContent = "Mark as read";
+      read.addEventListener("click", () => markRead(n));
+      actions.appendChild(read);
+    }
+    if (n.author === me.email) {
+      const del = document.createElement("button");
+      del.type = "button"; del.className = "danger"; del.textContent = "Delete";
+      del.addEventListener("click", () => deleteNote(n));
+      actions.appendChild(del);
+    }
+    if (actions.children.length) el.appendChild(actions);
+
+    card.appendChild(el);
+  });
+
+  list.appendChild(card);
+}
+</script>
+</body>
+</html>
