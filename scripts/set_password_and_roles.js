@@ -33,15 +33,14 @@ const SERVICE_ACCOUNT_RAW = process.env.FIREBASE_SERVICE_ACCOUNT;
 const SERVICE_ACCOUNT_PATH = path.join(__dirname, "service-account.json");
 const STAFF_LIST_PATH = path.join(__dirname, "staff-list.json");
 
-if (!SHARED_PASSWORD) {
-  console.error(
-    "\nSTAFF_SHARED_PASSWORD is not set, so there's no password to apply.\n" +
-      "Set it as a repository secret (Settings -> Secrets and variables ->\n" +
-      "Actions) and run this from the Actions tab, or export it locally.\n"
-  );
-  process.exit(1);
-}
-if (SHARED_PASSWORD.length < 6) {
+// No password set = roles-only mode, which is the normal case. Nobody's
+// password is touched; people set their own via "Forgot password?" on
+// the mobile site's sign-in screen, which has Firebase email them a
+// link. Setting STAFF_SHARED_PASSWORD is the opt-in escape hatch for
+// handing everyone the same temporary password instead.
+const ROLES_ONLY = !SHARED_PASSWORD;
+
+if (!ROLES_ONLY && SHARED_PASSWORD.length < 6) {
   console.error("\nFirebase requires passwords of at least 6 characters.\n");
   process.exit(1);
 }
@@ -77,6 +76,12 @@ const auth = admin.auth();
 const db = admin.firestore();
 
 async function main() {
+  console.log(
+    ROLES_ONLY
+      ? "Roles-only mode: nobody's password will be changed.\n"
+      : "Applying the shared password and roles.\n"
+  );
+
   for (const person of staffList) {
     const email = String(person.email).trim().toLowerCase();
     const role = person.role || "staff";
@@ -89,14 +94,29 @@ async function main() {
       continue;
     }
 
-    await auth.updateUser(user.uid, { password: SHARED_PASSWORD });
+    if (!ROLES_ONLY) {
+      await auth.updateUser(user.uid, { password: SHARED_PASSWORD });
+    }
     await db.collection("users").doc(email).set({ role }, { merge: true });
-    console.log(`Set password + role "${role}" for ${person.name} <${email}>`);
+    console.log(
+      ROLES_ONLY
+        ? `Set role "${role}" for ${person.name} <${email}>`
+        : `Set password + role "${role}" for ${person.name} <${email}>`
+    );
   }
-  // Deliberately not echoing the password itself -- this runs in
-  // GitHub Actions, whose logs are readable by anyone who can see the
-  // repository.
-  console.log("\nDone. Everyone above can now sign in with the shared password.");
+
+  if (ROLES_ONLY) {
+    console.log(
+      "\nDone. To get in the first time, each person opens the mobile site,\n" +
+        "types their email, and taps \"Forgot password?\" -- Firebase emails\n" +
+        "them a link to choose their own password."
+    );
+  } else {
+    // Deliberately not echoing the password itself -- this runs in
+    // GitHub Actions, whose logs are readable by anyone who can see
+    // the repository.
+    console.log("\nDone. Everyone above can now sign in with the shared password.");
+  }
 }
 
 main().catch((err) => {

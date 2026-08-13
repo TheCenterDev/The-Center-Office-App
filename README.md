@@ -187,16 +187,30 @@ in case it's ever needed again — e.g. a new Firebase project):
    password. After that, everyone else can be added through the app's
    Team page instead of the console.
 
+**How people get their first password.** There isn't a shared one, and
+nobody hands out passwords. Each person opens the mobile site, types
+their email address, and taps **Forgot password?** — Firebase emails
+them a link to choose their own. (Worth telling people to check their
+spam folder the first time; the mail comes from a firebaseapp.com
+address.) After that they can change it any time in **Settings →
+Security**.
+
 **Adding a new staff member** (the normal, ongoing way — no console
 work beyond step 1):
 
 1. Firebase console → **Authentication → Add user** → enter their email
-   and a temporary password. This is what lets them sign in at all.
+   and any throwaway password. This just creates the account; they'll
+   replace the password themselves via Forgot password?.
 2. In the mobile site, **Settings → Team** (Admin/Director only) → enter
    their email, name, and role, → **Save**. This is what tells the app
    who they are and what they're allowed to see.
-3. Tell them their temporary password, and point them at **Forgot
-   password?** on the sign-in screen if they'd rather set their own.
+3. Point them at the site and tell them to use **Forgot password?**.
+
+**Fixing everyone's roles at once.** If the roles in Firestore drift out
+of step with `scripts/staff-list.json`, run the **Set staff roles**
+workflow from the Actions tab. It only writes roles — passwords are left
+alone unless a `STAFF_SHARED_PASSWORD` secret exists, which normally it
+shouldn't.
 
 There's no self-service sign-up anywhere in the app on purpose — both
 steps above are deliberately manual and Admin/Director-only.
