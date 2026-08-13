@@ -28,30 +28,52 @@ white; the currently open item is highlighted in the sidebar.
 ## Download and run (easiest way — no setup required)
 
 Every push to `main` automatically builds fresh Windows and Mac versions
-and publishes them to this repo's **Releases** page, bundled together
-with the `html/` and `assets/` folders — ready to run right out of the
-zip, no Python or command line needed.
+and publishes them to this repo's **Releases** page — ready to run right
+out of the zip, no Python or command line needed.
 
 1. On GitHub, click **Releases** (right-hand sidebar of the repo page,
    or go directly to the repo's `/releases/latest` URL).
 2. Under **Assets**, download the zip for your OS:
    - `TheCenterOfficeLauncher-Windows.zip`
    - `TheCenterOfficeLauncher-Mac.zip`
-3. Unzip it. You'll get a folder containing the app plus its `html/` and
-   `assets/` folders, already sitting together correctly.
+3. Unzip it.
 4. Run it:
    - **Windows**: double-click `TheCenterOfficeLauncher.exe`. Windows
      SmartScreen may warn about an unrecognized app the first time —
-     click **More info** → **Run anyway**.
-   - **Mac**: **right-click** `TheCenterOfficeLauncher.app` and choose
-     **Open** (don't just double-click the first time) — macOS blocks
-     unsigned apps by default; this one-time right-click bypasses that.
-     Then optionally drag it into `/Applications` along with the
-     `html/` and `assets/` folders from the same unzipped download.
+     click **More info** → **Run anyway**. The unzipped folder has the
+     `.exe` plus `html/` and `assets/` next to it; keep them together
+     and the whole folder stays portable (a USB stick, a shared drive).
+   - **Mac**: the zip contains just `TheCenterOfficeLauncher.app`.
+     Drag it into `/Applications`, then **right-click** it and choose
+     **Open** the first time (don't just double-click) — macOS blocks
+     unsigned apps by default. If it still refuses, open **System
+     Settings → Privacy & Security** and click **Open Anyway** next to
+     its name.
 
 That's it — no `pip install`, no PyInstaller, no manual folder assembly.
 Anyone updating the documents just needs to edit files in `html/` and
 push to `main`; the next release will include the changes automatically.
+
+### Where the Mac app keeps its files
+
+The Mac app stores its data in `~/Library/Application Support/The Center
+Office App/` — the standard place Mac apps put this sort of thing. That
+folder holds `html/`, `assets/`, `users.json`, `settings.json`,
+`shared_preferences.json`, and `error_log.txt`.
+
+To open it in Finder: **Go** menu → **Go to Folder…** → paste
+`~/Library/Application Support/The Center Office App`.
+
+Earlier versions kept all of that in `/Applications`, right next to the
+app icon, which left six stray items sitting among the user's real
+applications. The app now moves them automatically the first time a
+newer build runs — nothing is lost, and anything already edited wins
+over the copies bundled in the app, so guide pages edited via **Edit
+This Page** survive updates. Fresh installs get starter copies from
+inside the app bundle instead.
+
+Windows is unchanged and still fully portable: the `.exe` reads `html/`
+and `assets/` from its own folder.
 
 ### Updating an already-installed Mac app without using a browser
 
@@ -59,8 +81,8 @@ push to `main`; the next release will include the changes automatically.
 it in Finder (or run it in Terminal) any time after pushing a code change,
 and it downloads the latest Mac build, quits the app if it's open, and
 replaces the one in `/Applications` — no manual zip download or dragging
-files around. It only ever touches the app itself, never `html/`, `assets/`,
-or any of the files that live alongside it (those are managed separately).
+files around. It only ever touches the app itself, never the data folder
+described above.
 
 ## Folder contents
 

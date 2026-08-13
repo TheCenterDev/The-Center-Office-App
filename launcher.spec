@@ -40,6 +40,16 @@ for pkg in ("customtkinter", "tkinterweb", "tkinterweb_tkhtml", "PIL"):
     # plugins without this explicit collect_all, which is what happened
     # to the build that shipped without a visible logo.
 
+# Ship read-only copies of html/ and assets/ *inside* the app. These are
+# never read directly at runtime -- they're only used to seed a fresh
+# install's real data folder the first time it opens (see
+# seed_data_dir_from_bundle in launcher.py), which is what lets the Mac
+# app keep its data in ~/Library/Application Support instead of
+# scattering html/, assets/, and four loose files across /Applications.
+# An existing data folder is never overwritten, so guide pages edited
+# in-app survive every update.
+datas += [("html", "html"), ("assets", "assets")]
+
 a = Analysis(
     ["launcher.py"],
     binaries=binaries,

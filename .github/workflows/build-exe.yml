@@ -98,12 +98,15 @@ jobs:
           fi
           echo "Pillow bundled OK."
 
-      - name: Assemble release folder (app + html + assets)
+      # Just the .app now -- html/ and assets/ are bundled inside it and
+      # get copied into ~/Library/Application Support on first launch.
+      # Shipping loose copies beside the app is what led to people
+      # dragging them into /Applications, which is the clutter this
+      # whole arrangement replaces.
+      - name: Assemble release folder (app only)
         run: |
           mkdir release
           cp -R dist/TheCenterOfficeLauncher.app release/
-          cp -R html release/
-          if [ -d assets ]; then cp -R assets release/; else mkdir release/assets; fi
 
       - name: Zip it up
         run: (cd release && zip -r ../TheCenterOfficeLauncher-Mac.zip .)

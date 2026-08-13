@@ -588,33 +588,156 @@ ROLE_LABELS = {"staff": "Staff", "admin": "Admin", "director": "Director"}
 ALLOWED_EMAIL_DOMAIN = "thecentercc.com"
 
 
-def get_base_dir() -> Path:
-    """Folder used to find html/ and assets/ — kept separate from any
-    PyInstaller temp-extraction folder so they stay normal, editable
-    folders on disk that can be added to or replaced without rebuilding.
+# Name of the per-user data folder on Mac, under ~/Library/Application
+# Support/. Only used for the packaged Mac app -- see get_base_dir.
+MAC_DATA_FOLDER_NAME = "The Center Office App"
 
-    - Running from source: the folder containing this script.
-    - Packaged on Windows (--onefile .exe): the folder containing the
-      .exe, so the whole thing stays one portable folder.
-    - Packaged on Mac (--windowed .app bundle): the real executable is
-      buried inside TheCenterOfficeLauncher.app/Contents/MacOS/, which
-      isn't where you'd want to keep editable html/ and assets/ folders
-      — especially once the .app is moved into /Applications. So on Mac
-      we walk up from the executable to find the enclosing ".app"
-      bundle and use the folder that *contains* it instead, meaning
-      html/ and assets/ sit right next to the visible app icon.
-    """
+
+def get_bundled_dir() -> Path:
+    """Where the read-only copies of html/ and assets/ that ship *inside*
+    the app live. Used only to seed a fresh install (see
+    seed_data_dir_from_bundle) -- never written to, and never read from
+    once real copies exist in BASE_DIR, so someone editing a guide page
+    isn't silently overwritten on the next update."""
     if getattr(sys, "frozen", False):
-        exe_path = Path(sys.executable).resolve()
-        if sys.platform == "darwin":
-            for parent in exe_path.parents:
-                if parent.suffix == ".app":
-                    return parent.parent
-        return exe_path.parent
+        # PyInstaller unpacks bundled data here (a temp folder for a
+        # onefile .exe, Contents/Frameworks for a Mac .app).
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
     return Path(__file__).resolve().parent
 
 
+def get_legacy_mac_dir():
+    """The old Mac location for editable data: the folder *containing*
+    TheCenterOfficeLauncher.app, which in practice means /Applications
+    itself. Everything used to live there -- html/, assets/, users.json,
+    settings.json -- which worked, but scattered six items across the
+    user's Applications folder, which is not how Mac apps behave.
+    Returns None when that doesn't apply. Kept solely so
+    migrate_legacy_mac_data() can move an existing install's files to
+    the new home; nothing else should read from here."""
+    if getattr(sys, "frozen", False) and sys.platform == "darwin":
+        exe_path = Path(sys.executable).resolve()
+        for parent in exe_path.parents:
+            if parent.suffix == ".app":
+                return parent.parent
+    return None
+
+
+def get_base_dir() -> Path:
+    """Folder holding the editable, per-machine data: html/, assets/,
+    settings.json, users.json, and the error log — kept out of any
+    PyInstaller temp-extraction folder so they stay normal folders on
+    disk that can be edited or added to without rebuilding the app.
+
+    - Running from source: the folder containing this script.
+    - Packaged on Windows (--onefile .exe): the folder containing the
+      .exe, so the whole thing stays one portable folder you can move
+      around or run off a shared drive.
+    - Packaged on Mac (.app bundle): ~/Library/Application Support/The
+      Center Office App — the standard place Mac apps keep this kind of
+      thing. It deliberately is NOT the folder next to the .app (i.e.
+      /Applications), which is what earlier versions used; that left
+      html/, assets/, and four loose files sitting in the user's
+      Applications folder alongside their real applications. Existing
+      installs are moved over automatically on first launch, see
+      migrate_legacy_mac_data().
+    """
+    if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            return Path.home() / "Library" / "Application Support" / MAC_DATA_FOLDER_NAME
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+# Everything the app keeps on disk, by name. Order matters only for the
+# progress of migration -- the folders are the slow ones.
+DATA_ITEM_NAMES = (
+    "html",
+    "assets",
+    "users.json",
+    "settings.json",
+    "shared_preferences.json",
+    "error_log.txt",
+)
+
+
+def migrate_legacy_mac_data(base_dir: Path):
+    """One-time move of an existing Mac install's data out of
+    /Applications and into ~/Library/Application Support/. Runs on every
+    launch but does nothing once there's nothing left to move, and never
+    overwrites anything already in the new location, so it's safe to
+    re-run and safe if someone half-moved things by hand.
+
+    Deliberately best-effort per item: /Applications is normally
+    writable by an admin user, but if a move fails (permissions, or the
+    file being open), the app falls back to copying it, and failing
+    that just skips it rather than refusing to start. Returns the list
+    of item names it actually brought over, for logging."""
+    legacy = get_legacy_mac_dir()
+    if legacy is None:
+        return []
+    try:
+        if legacy.resolve() == base_dir.resolve():
+            return []
+    except OSError:
+        return []
+
+    moved = []
+    for name in DATA_ITEM_NAMES:
+        src = legacy / name
+        dst = base_dir / name
+        if not src.exists() or dst.exists():
+            continue
+        try:
+            base_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            moved.append(name)
+        except Exception:
+            try:
+                if src.is_dir():
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
+                moved.append(name)
+            except Exception:
+                pass
+    return moved
+
+
+def seed_data_dir_from_bundle(base_dir: Path):
+    """Fresh install with nothing to migrate: lay down the copies of
+    html/ and assets/ that shipped inside the app, so the guides and
+    logo are there the first time it opens. Only ever fills in what's
+    missing -- an existing html/ (possibly with pages edited in-app) is
+    left completely alone."""
+    bundled = get_bundled_dir()
+    seeded = []
+    for name in ("html", "assets"):
+        src = bundled / name
+        dst = base_dir / name
+        if dst.exists() or not src.exists():
+            continue
+        try:
+            base_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dst)
+            seeded.append(name)
+        except Exception:
+            pass
+    return seeded
+
+
 BASE_DIR = get_base_dir()
+try:
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    _migrated_items = migrate_legacy_mac_data(BASE_DIR)
+    _seeded_items = seed_data_dir_from_bundle(BASE_DIR)
+except Exception:
+    # Never let a storage-location problem stop the app from opening --
+    # a missing html/ already degrades gracefully (see _show_home's
+    # fallback), and write_error_log below can't be called yet anyway
+    # since ERROR_LOG_FILE depends on BASE_DIR.
+    _migrated_items = []
+    _seeded_items = []
 HTML_DIR = BASE_DIR / "html"
 ASSETS_DIR = BASE_DIR / "assets"
 SETTINGS_FILE = BASE_DIR / "settings.json"
@@ -633,6 +756,21 @@ def write_error_log(details: str):
             f.write(f"\n---- {time.strftime('%Y-%m-%d %H:%M:%S')} ----\n{details}")
     except OSError:
         pass
+
+
+# Deferred until write_error_log exists (ERROR_LOG_FILE needs BASE_DIR,
+# which is what the migration above was setting up). Moving someone's
+# data between folders is exactly the kind of thing worth having a
+# record of if a page or login later seems to have gone missing.
+if _migrated_items:
+    write_error_log(
+        "(moved app data out of the Applications folder into "
+        f"{BASE_DIR})\nItems: {', '.join(_migrated_items)}\n"
+    )
+if _seeded_items:
+    write_error_log(
+        f"(first run -- copied starter {', '.join(_seeded_items)} into {BASE_DIR})\n"
+    )
 
 
 _pil_missing_logged = False
