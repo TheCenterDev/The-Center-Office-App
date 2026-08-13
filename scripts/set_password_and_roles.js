@@ -1,25 +1,68 @@
 /*
- * One-time correction script: sets every account in staff-list.json to
- * the shared password below, and force-updates their Firestore role to
- * match staff-list.json (unlike create_logins.js, which never touches
- * an account that already exists -- this one deliberately overwrites
- * both, since that's exactly what was asked for).
+ * Sets every account in staff-list.json to one shared password, and
+ * force-updates their Firestore role to match staff-list.json (unlike
+ * create_logins.js, which never touches an account that already
+ * exists -- this one deliberately overwrites both).
  *
- * Needs the same scripts/service-account.json as create_logins.js.
- * Run with:
+ * Easiest way to run it: GitHub -> Actions tab -> "Set staff passwords
+ * and roles" -> Run workflow. No Terminal, no local setup; it uses the
+ * repository secrets.
+ *
+ * To run it locally instead, you need the Firebase service account key
+ * and the password in the environment -- neither is stored in this
+ * repo:
+ *   export STAFF_SHARED_PASSWORD="..."
+ *   export FIREBASE_SERVICE_ACCOUNT="$(cat scripts/service-account.json)"
  *   node scripts/set_password_and_roles.js
+ *
+ * The password is read from the environment rather than written here
+ * on purpose. This repo is what publishes the public mobile site, and
+ * the staff email addresses are on the site's own Contacts page -- a
+ * shared password committed alongside them would be everything an
+ * outsider needs to sign in.
  */
 
 const fs = require("fs");
 const path = require("path");
 
-const SHARED_PASSWORD = "Center123";
+const SHARED_PASSWORD = process.env.STAFF_SHARED_PASSWORD;
 
+// Prefer the environment (GitHub Actions secret); fall back to a local
+// service-account.json file for hand-runs.
+const SERVICE_ACCOUNT_RAW = process.env.FIREBASE_SERVICE_ACCOUNT;
 const SERVICE_ACCOUNT_PATH = path.join(__dirname, "service-account.json");
 const STAFF_LIST_PATH = path.join(__dirname, "staff-list.json");
 
-if (!fs.existsSync(SERVICE_ACCOUNT_PATH)) {
-  console.error("\nCouldn't find scripts/service-account.json. See create_logins.js for how to get it.\n");
+if (!SHARED_PASSWORD) {
+  console.error(
+    "\nSTAFF_SHARED_PASSWORD is not set, so there's no password to apply.\n" +
+      "Set it as a repository secret (Settings -> Secrets and variables ->\n" +
+      "Actions) and run this from the Actions tab, or export it locally.\n"
+  );
+  process.exit(1);
+}
+if (SHARED_PASSWORD.length < 6) {
+  console.error("\nFirebase requires passwords of at least 6 characters.\n");
+  process.exit(1);
+}
+
+let serviceAccount;
+if (SERVICE_ACCOUNT_RAW) {
+  try {
+    serviceAccount = JSON.parse(SERVICE_ACCOUNT_RAW);
+  } catch (e) {
+    console.error("\nFIREBASE_SERVICE_ACCOUNT isn't valid JSON:", e.message, "\n");
+    process.exit(1);
+  }
+} else if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+  serviceAccount = require(SERVICE_ACCOUNT_PATH);
+} else {
+  console.error(
+    "\nNo Firebase credentials. Either set the FIREBASE_SERVICE_ACCOUNT\n" +
+      "environment variable (this is what the GitHub Actions run uses), or\n" +
+      "put a service-account.json in the scripts/ folder -- see the\n" +
+      "instructions at the top of create_logins.js.\n"
+  );
   process.exit(1);
 }
 
@@ -27,7 +70,7 @@ const admin = require("firebase-admin");
 const staffList = JSON.parse(fs.readFileSync(STAFF_LIST_PATH, "utf8"));
 
 admin.initializeApp({
-  credential: admin.credential.cert(require(SERVICE_ACCOUNT_PATH)),
+  credential: admin.credential.cert(serviceAccount),
 });
 
 const auth = admin.auth();
@@ -50,7 +93,10 @@ async function main() {
     await db.collection("users").doc(email).set({ role }, { merge: true });
     console.log(`Set password + role "${role}" for ${person.name} <${email}>`);
   }
-  console.log(`\nDone. Everyone above can now sign in with the password: ${SHARED_PASSWORD}`);
+  // Deliberately not echoing the password itself -- this runs in
+  // GitHub Actions, whose logs are readable by anyone who can see the
+  // repository.
+  console.log("\nDone. Everyone above can now sign in with the shared password.");
 }
 
 main().catch((err) => {
