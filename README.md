@@ -264,6 +264,46 @@ just shared live across everyone now instead of stuck on one browser.
 See `firestore.rules` for the exact rule (unchanged from the login
 rules otherwise; just two new collections added at the bottom).
 
+### Maintenance requests go to Todoist automatically
+
+New Building Maintenance Log entries are turned into tasks in the
+Todoist **Facilities - TCWCY** project, roughly every 5 minutes, by
+`.github/workflows/todoist-sync.yml` running `scripts/sync_todoist.js`.
+
+Each task gets the location and issue as its title, and location,
+urgency, reporter, and date in the description. Urgency maps to Todoist
+priority, so Urgent items land at P1 and sort to the top.
+
+**Why it's a scheduled job and not instant.** A Todoist *personal* API
+token grants full access to the entire account — Todoist's add-only
+permission (`task:add`) exists for OAuth apps only, not personal tokens.
+The Maintenance Log is a public web page, so a token placed in it could
+be read by anyone who opens the site. Running the sync in GitHub Actions
+keeps the token in encrypted secrets, where no browser ever sees it.
+
+**Duplicates can't happen.** Once an entry is sent, its Firestore
+document gets a `todoistTaskId` field written back, and anything with
+that field is skipped from then on. The workflow also uses a
+concurrency group so two runs can't overlap.
+
+**One-time setup** — in the repo, go to **Settings → Secrets and
+variables → Actions → New repository secret**, and add two:
+
+| Secret name | Value |
+| --- | --- |
+| `TODOIST_API_TOKEN` | Todoist → Settings → Integrations → Developer → your API token |
+| `FIREBASE_SERVICE_ACCOUNT` | The entire contents of a Firebase service account JSON key (Firebase console → Project settings → Service accounts → Generate new private key) |
+
+Then go to the **Actions** tab → **Send maintenance requests to
+Todoist** → **Run workflow** to test it without waiting for the
+schedule. The run log lists exactly what it sent.
+
+To point it at a different Todoist project, either edit
+`DEFAULT_PROJECT_ID` in `scripts/sync_todoist.js` or add a
+`TODOIST_PROJECT_ID` secret. The ID is the last part of the project's
+URL — for `.../project/facilities-tcwcy-td-6CrfG2HXhxfV58Qw` it's
+`6CrfG2HXhxfV58Qw`.
+
 **Photos aren't synced.** The Maintenance Log's photo field was removed
 rather than half-supported — Firestore documents cap out around 1 MB,
 and a synced-photo feature really wants Firebase Storage instead, which

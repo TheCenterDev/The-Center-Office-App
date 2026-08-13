@@ -1,0 +1,52 @@
+name: Send maintenance requests to Todoist
+
+# Checks the Building Maintenance Log's Firestore collection for entries
+# that haven't been sent to Todoist yet, and creates a task in the
+# Facilities project for each one. See scripts/sync_todoist.js.
+#
+# Runs on a schedule rather than the moment someone submits the form,
+# because the form runs in a public web page and a Todoist personal
+# token grants full account access -- it can't safely live in the
+# browser. Here it lives only in this repo's encrypted secrets.
+#
+# Required repository secrets (Settings -> Secrets and variables ->
+# Actions -> New repository secret):
+#   TODOIST_API_TOKEN         -- Todoist personal API token
+#   FIREBASE_SERVICE_ACCOUNT  -- full contents of a Firebase service
+#                                account JSON key
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub queues scheduled runs on a best-effort
+    # basis, so treat this as "within about 5-10 minutes" rather than
+    # exact -- fine for maintenance requests, and it costs nothing.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+# Never let two runs overlap: both could read the same not-yet-synced
+# entry before either writes back its todoistTaskId, which is the one
+# way this could post a duplicate task.
+concurrency:
+  group: todoist-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install firebase-admin --no-audit --no-fund
+
+      - name: Send new entries to Todoist
+        env:
+          TODOIST_API_TOKEN: ${{ secrets.TODOIST_API_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/sync_todoist.js
