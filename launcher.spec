@@ -21,13 +21,24 @@ from PyInstaller.utils.hooks import collect_all
 datas = []
 binaries = []
 hiddenimports = []
-for pkg in ("customtkinter", "tkinterweb", "tkinterweb_tkhtml"):
+for pkg in ("customtkinter", "tkinterweb", "tkinterweb_tkhtml", "PIL"):
     pkg_datas, pkg_binaries, pkg_hiddenimports = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries
     hiddenimports += pkg_hiddenimports
     # pywebview ships its own PyInstaller hook (auto-discovered), so it
     # doesn't need collect_all here.
+    #
+    # PIL (Pillow) needs to be here too: launcher.py does a plain
+    # `from PIL import Image, ImageDraw` wrapped in try/except ImportError
+    # (see load_logo_image and friends), so a build missing Pillow's
+    # compiled _imaging extension or its plugin modules doesn't crash --
+    # it just silently disables the logo and every drawn icon (search,
+    # team) with nothing in error_log.txt to explain why, since that's
+    # exactly the failure mode the try/except was written to survive.
+    # PyInstaller's static analysis can miss Pillow's dynamically-loaded
+    # plugins without this explicit collect_all, which is what happened
+    # to the build that shipped without a visible logo.
 
 a = Analysis(
     ["launcher.py"],

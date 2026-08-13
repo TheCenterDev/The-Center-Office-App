@@ -349,9 +349,11 @@ except Exception:
 
 try:
     from PIL import Image, ImageDraw
-except ImportError:
+    _pil_import_error = None
+except ImportError as _e:
     Image = None  # CustomTkinter installs Pillow automatically; this is a fallback.
     ImageDraw = None
+    _pil_import_error = str(_e)
 
 try:
     from tkinterweb import HtmlFrame
@@ -626,6 +628,29 @@ def write_error_log(details: str):
             f.write(f"\n---- {time.strftime('%Y-%m-%d %H:%M:%S')} ----\n{details}")
     except OSError:
         pass
+
+
+_pil_missing_logged = False
+
+
+def log_pil_missing_once():
+    """Pillow failing to import is normally silent by design (see the
+    try/except around `from PIL import Image, ImageDraw` above) so a
+    packaged build missing it degrades to no logo/icons instead of
+    crashing outright -- but silent also means undiagnosable, which is
+    exactly what happened when a Mac build shipped without Pillow's
+    compiled bits bundled (fixed in launcher.spec's collect_all list).
+    This writes it to error_log.txt the first time anything actually
+    needed an image, without spamming the log on every sidebar rebuild
+    that calls load_logo_image() again."""
+    global _pil_missing_logged
+    if _pil_missing_logged:
+        return
+    _pil_missing_logged = True
+    write_error_log(
+        "(Pillow/PIL unavailable -- logo and drawn icons will be missing)\n"
+        f"ImportError: {_pil_import_error}\n"
+    )
 
 
 def log_and_show_error(exc_type, exc_value, exc_tb):
@@ -1066,6 +1091,7 @@ def load_logo_image(height, white=False):
     changes instead of sitting frozen while everything around it
     re-themes (see _build_sidebar)."""
     if Image is None:
+        log_pil_missing_once()
         return None
     for candidate in (ASSETS_DIR / "logo.png", ASSETS_DIR / "logo.jpg", ASSETS_DIR / "logo.jpeg"):
         if candidate.exists():
@@ -1079,7 +1105,7 @@ def load_logo_image(height, white=False):
                     img = silhouette
                 return ctk.CTkImage(light_image=img, dark_image=img, size=(width, height))
             except Exception:
-                pass
+                write_error_log(f"(load_logo_image failed on {candidate})\n{traceback.format_exc()}")
     return None
 
 
@@ -1092,6 +1118,7 @@ def build_search_icon(size=16, color="#ffffff"):
     target size and downsampled with LANCZOS so the circle and line come
     out smooth instead of jagged."""
     if Image is None or ImageDraw is None:
+        log_pil_missing_once()
         return None
     scale = 4
     big = size * scale
@@ -1114,6 +1141,7 @@ def build_team_icon(size=16, color="#ffffff"):
     smaller overlap (vs. two heavily-overlapping circles) is what keeps
     it reading as two people rather than one blob."""
     if Image is None or ImageDraw is None:
+        log_pil_missing_once()
         return None
     scale = 4
     big = size * scale
