@@ -64,6 +64,7 @@ as a standalone Windows .exe or Mac .app that colleagues can run
 without installing Python.
 """
 
+import hashlib
 import html
 import html.parser
 import json
@@ -705,26 +706,98 @@ def migrate_legacy_mac_data(base_dir: Path):
     return moved
 
 
+# A copy of exactly what was last laid down from the app bundle. It's
+# what makes it possible to tell "this file is just the shipped version"
+# apart from "somebody edited this page in the app", which decides
+# whether an update may overwrite it.
+SNAPSHOT_DIR_NAME = ".bundled-snapshot"
+
+
+def _file_digest(path: Path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def seed_data_dir_from_bundle(base_dir: Path):
-    """Fresh install with nothing to migrate: lay down the copies of
-    html/ and assets/ that shipped inside the app, so the guides and
-    logo are there the first time it opens. Only ever fills in what's
-    missing -- an existing html/ (possibly with pages edited in-app) is
-    left completely alone."""
+    """Keeps html/ and assets/ up to date with the copies shipped inside
+    the app, without throwing away pages edited through "Edit This Page".
+
+    The first version of this only ever filled in what was *missing*,
+    which quietly broke updates: once the folder existed, a newer app
+    could never deliver a corrected guide or a fixed tool again. The
+    updated Onboarding Tracker shipped inside the app and simply never
+    appeared, because an older copy already sat in the data folder.
+
+    So for each file: if it's identical to what was last laid down, it's
+    untouched and gets updated. If it differs, someone edited it, and it
+    is left exactly as it is. New files arrive; files deleted on purpose
+    stay deleted.
+
+    On the very first run there's no snapshot to compare against, so
+    nothing can be classified. Rather than guess, the existing folder is
+    set aside as html-backup-<timestamp>/ and a clean copy is laid down.
+    Nothing is lost, and from then on edit detection works properly."""
     bundled = get_bundled_dir()
-    seeded = []
+    snapshot_root = base_dir / SNAPSHOT_DIR_NAME
+    changed = []
+
     for name in ("html", "assets"):
-        src = bundled / name
-        dst = base_dir / name
-        if dst.exists() or not src.exists():
+        src_root = bundled / name
+        dst_root = base_dir / name
+        snap_root = snapshot_root / name
+        if not src_root.exists():
             continue
+
         try:
-            base_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dst)
-            seeded.append(name)
+            if not dst_root.exists():
+                shutil.copytree(src_root, dst_root)
+                shutil.rmtree(snap_root, ignore_errors=True)
+                shutil.copytree(src_root, snap_root)
+                changed.append(f"{name} (first install)")
+                continue
+
+            if not snap_root.exists():
+                # Upgrading from a build that didn't keep a snapshot.
+                backup = base_dir / f"{name}-backup-{time.strftime('%Y%m%d-%H%M%S')}"
+                shutil.copytree(dst_root, backup)
+                for item in src_root.iterdir():
+                    target = dst_root / item.name
+                    if item.is_dir():
+                        shutil.rmtree(target, ignore_errors=True)
+                        shutil.copytree(item, target)
+                    else:
+                        shutil.copy2(item, target)
+                shutil.copytree(src_root, snap_root)
+                changed.append(f"{name} (refreshed; previous copy kept in {backup.name})")
+                continue
+
+            for item in src_root.rglob("*"):
+                if not item.is_file():
+                    continue
+                relative = item.relative_to(src_root)
+                local = dst_root / relative
+                snapshot = snap_root / relative
+
+                if local.exists():
+                    local_digest = _file_digest(local)
+                    snapshot_digest = _file_digest(snapshot)
+                    if snapshot_digest is not None and local_digest != snapshot_digest:
+                        continue  # edited here on purpose -- leave it alone
+                    if local_digest == _file_digest(item):
+                        continue  # already current
+
+                local.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, local)
+                snapshot.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, snapshot)
+                changed.append(str(Path(name) / relative))
         except Exception:
+            # A problem updating content must never stop the app opening.
             pass
-    return seeded
+
+    return changed
 
 
 BASE_DIR = get_base_dir()
