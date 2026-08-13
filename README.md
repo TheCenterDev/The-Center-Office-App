@@ -308,7 +308,36 @@ Two of the interactive tools now save to the same Firebase project as
 login, instead of each device's own browser storage:
 
 - **Building Maintenance Log** → `maintenance_log` collection
-- **New Hire Onboarding Tracker** → `onboarding_hires` collection
+- **New Hire Onboarding Tracker** → `onboarding_hires` collection (each
+  hire's progress) and `onboarding_template` (the checklist itself)
+
+### Editing the onboarding checklist
+
+The checklist used to be fixed in the page's code, so changing it meant
+editing a file and shipping a new build. It now lives in the database
+and is edited in the app: open the New Hire Onboarding Tracker and click
+**Edit Checklist**. You can add, rename, and delete both sections and
+individual items, plus an optional note under any item. Nothing saves
+until you click **Save Checklist**, and **Cancel** discards cleanly.
+
+Edits apply everywhere at once — every computer, the mobile site, and
+every hire's checklist, current and future.
+
+Two details worth knowing:
+
+- **Rewording an item keeps whoever already ticked it ticked.** Each
+  item has a hidden id that stays the same when you change its wording,
+  which is what preserves progress. Deleting an item and adding a
+  replacement instead creates a genuinely new item, unticked for
+  everyone.
+- **Deleting an item doesn't disturb past hires' records.** Their old
+  ticks are simply no longer shown.
+
+**Only Admin and Director can edit it** — the button is hidden from
+everyone else, and `firestore.rules` enforces it on the server, so it
+holds even for someone who works around the page itself. Everyone can
+still tick boxes and add per-hire "Additional Items", which apply to
+that one person only.
 
 Any signed-in person with a profile can read, add, edit, or delete in
 either one — same flat permissions the old single-device versions had,

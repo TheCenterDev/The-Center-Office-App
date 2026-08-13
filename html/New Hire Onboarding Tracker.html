@@ -99,6 +99,7 @@
         <select id="hireSelect"></select>
         <button class="ghost" id="newHireBtn" type="button">+ New Hire</button>
         <button class="danger" id="removeHireBtn" type="button">Remove This Hire</button>
+        <button class="ghost" id="editChecklistBtn" type="button" style="display:none;">Edit Checklist</button>
       </div>
     </div>
 
@@ -138,8 +139,15 @@ const DIRECTORS = [
   { name: "Sarah Johnson", role: "Director of Finance and HR", email: "sarah@thecentercc.com" },
 ];
 
-// Checklist grounded in The Center Employee Handbook + Key Contacts.
-const CHECKLIST = [
+/* The starting checklist, grounded in The Center Employee Handbook +
+ * Key Contacts. This is only a seed: the live checklist is stored in
+ * Firestore (onboarding_template/default) so that editing it applies
+ * everywhere -- every computer, the mobile site, and any future hire --
+ * instead of being frozen in this file and only changeable by editing
+ * code and shipping a new build. The seed is written to the database
+ * once, the first time someone opens this page after the template
+ * collection is empty; after that this array is never read again. */
+const DEFAULT_CHECKLIST = [
   { group: "Accounts & Access", items: [
     { id: "gdrive", text: "Confirm Google Drive shared-drive access (put everything in the shared drive, not a personal drive)" },
     { id: "email", text: "Company email set up and checked" },
@@ -170,9 +178,40 @@ let data = {}; // { hireId: { name, startDate, checked: {itemId: bool}, custom: 
 let currentId = null;
 let unsubscribe = null;
 
+// The live, shared checklist -- loaded from Firestore and kept in sync,
+// so an edit made on one device shows up on every other one.
+let CHECKLIST = [];
+let templateUnsub = null;
+let canEditTemplate = false;   // Admin/Director only; also enforced by firestore.rules
+let editingTemplate = false;
+
+const TEMPLATE_DOC = () => db.collection("onboarding_template").doc("default");
+
+/* Checklist text is typed by staff and then placed into the page. Going
+ * through innerHTML with raw text would let anything typed into a
+ * checklist item -- deliberately or by accident -- be interpreted as
+ * HTML, and a pasted <script> or an onerror= attribute would then run
+ * for every person who opens this page. Everything from the database is
+ * escaped through here first. */
+function esc(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/* Only ordinary web links are allowed to become clickable. Without this,
+ * a "link" of javascript:... would run code when clicked. */
+function safeUrl(url) {
+  const value = String(url || "").trim();
+  return /^https?:\/\//i.test(value) ? value : "";
+}
+
 function allItemIds(hire) {
   const ids = [];
-  CHECKLIST.forEach(g => g.items.forEach(i => ids.push(i.id)));
+  CHECKLIST.forEach(g => (g.items || []).forEach(i => ids.push(i.id)));
   (hire.custom || []).forEach(c => ids.push(c.id));
   return ids;
 }
@@ -200,6 +239,7 @@ document.getElementById("signOutBtn").addEventListener("click", () => auth.signO
 
 auth.onAuthStateChanged(user => {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  if (templateUnsub) { templateUnsub(); templateUnsub = null; }
   if (!user) {
     document.getElementById("authGate").style.display = "block";
     document.getElementById("appArea").style.display = "none";
@@ -214,12 +254,48 @@ auth.onAuthStateChanged(user => {
         "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
       return;
     }
-    document.getElementById("whoami").textContent = "Signed in as " + ((snap.data() || {}).name || user.email);
+    const profile = snap.data() || {};
+    // Editing the checklist changes it for every future hire and every
+    // person in the organisation, so it's limited to Admin/Director.
+    // This only hides the controls -- firestore.rules is what actually
+    // enforces it, since anything in a web page can be bypassed.
+    canEditTemplate = profile.role === "admin" || profile.role === "director";
+    document.getElementById("editChecklistBtn").style.display = canEditTemplate ? "" : "none";
+    document.getElementById("whoami").textContent = "Signed in as " + (profile.name || user.email);
     document.getElementById("authGate").style.display = "none";
     document.getElementById("appArea").style.display = "block";
+    listenTemplate();
     listen();
   });
 });
+
+function listenTemplate() {
+  templateUnsub = TEMPLATE_DOC().onSnapshot(snap => {
+    if (!snap.exists) {
+      // First ever run: publish the built-in checklist so there's
+      // something to work from. Only an Admin/Director is allowed to
+      // write it; if a staff member happens to be first, they simply
+      // see an empty checklist until someone with permission opens it.
+      if (canEditTemplate) {
+        TEMPLATE_DOC().set({ groups: DEFAULT_CHECKLIST }).catch(() => {});
+      }
+      CHECKLIST = [];
+      renderHireArea();
+      return;
+    }
+    CHECKLIST = (snap.data() || {}).groups || [];
+    renderHireArea();
+  }, err => {
+    document.getElementById("hireArea").innerHTML =
+      '<div class="empty">Couldn\'t load the checklist: ' + esc(err.message) + "</div>";
+  });
+}
+
+function saveTemplate(groups) {
+  return TEMPLATE_DOC().set({ groups }, { merge: false }).catch(err => {
+    alert("Couldn't save the checklist: " + err.message);
+  });
+}
 
 function listen() {
   unsubscribe = db.collection("onboarding_hires").onSnapshot(snap => {
@@ -326,37 +402,55 @@ function renderHireArea() {
     updateHire(currentId, { startDate: e.target.value });
   });
 
-  CHECKLIST.forEach(g => {
-    const sec = document.createElement("section");
-    sec.className = "group card";
-    let inner = `<h2>${g.group}</h2>`;
-    g.items.forEach(i => {
-      const done = hire.checked && hire.checked[i.id];
-      inner += `<div class="item ${done ? "done" : ""}">
-        <input type="checkbox" data-id="${i.id}" ${done ? "checked" : ""}>
-        <label for="cb_${i.id}">${i.text}${i.hint ? `<span class="hint">${i.hint}</span>` : ""}${i.link ? `<span class="hint"><a class="dl" href="${i.link}" target="_blank" rel="noopener">${i.linkText}</a></span>` : ""}</label>
-      </div>`;
-    });
-    sec.innerHTML = inner;
-    sec.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      cb.addEventListener("change", () => {
-        const checked = Object.assign({}, hire.checked || {});
-        checked[cb.dataset.id] = cb.checked;
-        updateHire(currentId, { checked });
+  if (editingTemplate) {
+    renderTemplateEditor(area);
+  } else {
+    CHECKLIST.forEach(g => {
+      const sec = document.createElement("section");
+      sec.className = "group card";
+      let inner = `<h2>${esc(g.group)}</h2>`;
+      (g.items || []).forEach(i => {
+        const done = hire.checked && hire.checked[i.id];
+        const url = safeUrl(i.link);
+        inner += `<div class="item ${done ? "done" : ""}">
+          <input type="checkbox" data-id="${esc(i.id)}" ${done ? "checked" : ""}>
+          <label>${esc(i.text)}${i.hint ? `<span class="hint">${esc(i.hint)}</span>` : ""}${url ? `<span class="hint"><a class="dl" href="${esc(url)}" target="_blank" rel="noopener">${esc(i.linkText || url)}</a></span>` : ""}</label>
+        </div>`;
       });
+      if (!(g.items || []).length) {
+        inner += '<div class="empty" style="padding:10px 0;">No items in this section yet.</div>';
+      }
+      sec.innerHTML = inner;
+      sec.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.addEventListener("change", () => {
+          const checked = Object.assign({}, hire.checked || {});
+          checked[cb.dataset.id] = cb.checked;
+          updateHire(currentId, { checked });
+        });
+      });
+      area.appendChild(sec);
     });
-    area.appendChild(sec);
-  });
 
-  // Custom items
+    if (!CHECKLIST.length) {
+      const none = document.createElement("div");
+      none.className = "empty";
+      none.textContent = canEditTemplate
+        ? "The checklist is empty — click Edit Checklist to build it."
+        : "The checklist is empty — ask an Admin or Director to set it up.";
+      area.appendChild(none);
+    }
+  }
+
+  // Custom items -- these stay per-hire (just for this person), unlike
+  // the shared checklist above which applies to everyone.
   const customSec = document.createElement("section");
   customSec.className = "group card";
-  let customHtml = "<h2>Additional Items</h2>";
+  let customHtml = "<h2>Additional Items <span class=\"hint\" style=\"font-weight:400;\">(only for this hire)</span></h2>";
   (hire.custom || []).forEach(c => {
     const done = hire.checked && hire.checked[c.id];
     customHtml += `<div class="item ${done ? "done" : ""}">
-      <input type="checkbox" data-id="${c.id}" ${done ? "checked" : ""}>
-      <label>${c.text}</label>
+      <input type="checkbox" data-id="${esc(c.id)}" ${done ? "checked" : ""}>
+      <label>${esc(c.text)}</label>
     </div>`;
   });
   customHtml += `<div class="addrow"><input type="text" id="customInput" placeholder="Add a custom checklist item…"><button class="ghost" id="addCustomBtn" type="button">Add</button></div>`;
@@ -380,7 +474,7 @@ function renderHireArea() {
   const notifyCard = document.createElement("div");
   notifyCard.className = "card notifybar";
   notifyCard.innerHTML = `
-    <div class="who">Sends to: ${DIRECTORS.map(d => d.name).join(", ")}</div>
+    <div class="who">Sends to: ${esc(DIRECTORS.map(d => d.name).join(", "))}</div>
     <a class="primary" style="text-decoration:none; display:inline-block;" href="${mailtoLink(
       (p.pct === 100 ? "Onboarding Complete: " : "Onboarding Update: ") + hire.name,
       buildUpdateBody(hire)
@@ -389,9 +483,177 @@ function renderHireArea() {
   area.appendChild(notifyCard);
 }
 
+/* ------------------------------------------------- checklist editor --
+ * Edits the shared template, not any one hire. Everything is applied to
+ * a working copy and only written to the database on Save, so a
+ * half-finished edit is never visible to anyone else, and Cancel really
+ * does discard.
+ *
+ * Item ids are the link between the template and each hire's ticked
+ * boxes, so they're generated once and never rewritten -- renaming an
+ * item's wording deliberately keeps its id, and therefore keeps whoever
+ * had already ticked it ticked. Removing an item leaves those old
+ * entries harmlessly unused rather than trying to rewrite every hire. */
+let draft = null;
+
+function startEditing() {
+  draft = JSON.parse(JSON.stringify(CHECKLIST || []));
+  editingTemplate = true;
+  renderHireArea();
+}
+
+function stopEditing() {
+  draft = null;
+  editingTemplate = false;
+  renderHireArea();
+}
+
+function newId(prefix) {
+  return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function renderTemplateEditor(area) {
+  const intro = document.createElement("div");
+  intro.className = "card";
+  intro.innerHTML =
+    '<h2 style="margin-top:0;">Editing the checklist</h2>' +
+    '<div class="hint" style="margin-bottom:10px;">' +
+    "Changes apply to every hire and everyone in the organisation, on every device. " +
+    "Ticked boxes are kept when you reword an item. Nothing is saved until you click Save." +
+    "</div>";
+  area.appendChild(intro);
+
+  (draft || []).forEach((group, gi) => {
+    const sec = document.createElement("section");
+    sec.className = "group card";
+
+    const head = document.createElement("div");
+    head.className = "addrow";
+    head.style.marginBottom = "10px";
+    const groupInput = document.createElement("input");
+    groupInput.type = "text";
+    groupInput.value = group.group || "";
+    groupInput.placeholder = "Section name";
+    groupInput.addEventListener("input", () => { draft[gi].group = groupInput.value; });
+    const delGroup = document.createElement("button");
+    delGroup.type = "button";
+    delGroup.className = "danger";
+    delGroup.textContent = "Delete Section";
+    delGroup.addEventListener("click", () => {
+      if (!confirm('Delete the "' + (group.group || "untitled") + '" section and all its items?')) return;
+      draft.splice(gi, 1);
+      renderHireArea();
+    });
+    head.appendChild(groupInput);
+    head.appendChild(delGroup);
+    sec.appendChild(head);
+
+    (group.items || []).forEach((item, ii) => {
+      const row = document.createElement("div");
+      row.className = "addrow";
+      row.style.marginBottom = "6px";
+
+      const textInput = document.createElement("input");
+      textInput.type = "text";
+      textInput.value = item.text || "";
+      textInput.placeholder = "Checklist item";
+      textInput.addEventListener("input", () => { draft[gi].items[ii].text = textInput.value; });
+
+      const hintInput = document.createElement("input");
+      hintInput.type = "text";
+      hintInput.value = item.hint || "";
+      hintInput.placeholder = "Note (optional)";
+      hintInput.style.maxWidth = "220px";
+      hintInput.addEventListener("input", () => { draft[gi].items[ii].hint = hintInput.value; });
+
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "danger";
+      del.textContent = "✕";
+      del.title = "Remove this item";
+      del.addEventListener("click", () => {
+        draft[gi].items.splice(ii, 1);
+        renderHireArea();
+      });
+
+      row.appendChild(textInput);
+      row.appendChild(hintInput);
+      row.appendChild(del);
+      sec.appendChild(row);
+    });
+
+    const addRow = document.createElement("div");
+    addRow.className = "addrow";
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "ghost";
+    addBtn.textContent = "+ Add item";
+    addBtn.addEventListener("click", () => {
+      draft[gi].items = (draft[gi].items || []).concat([{ id: newId("i"), text: "" }]);
+      renderHireArea();
+    });
+    addRow.appendChild(addBtn);
+    sec.appendChild(addRow);
+
+    area.appendChild(sec);
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "card";
+  const addSection = document.createElement("button");
+  addSection.type = "button";
+  addSection.className = "ghost";
+  addSection.textContent = "+ Add section";
+  addSection.addEventListener("click", () => {
+    draft.push({ group: "New section", items: [] });
+    renderHireArea();
+  });
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "primary";
+  save.textContent = "Save Checklist";
+  save.style.marginLeft = "8px";
+  save.addEventListener("click", () => {
+    // Drop blank rows rather than saving empty checklist items that
+    // nobody can act on, and make sure every item has an id.
+    const cleaned = (draft || [])
+      .map(g => ({
+        group: (g.group || "").trim() || "Untitled section",
+        items: (g.items || [])
+          .filter(i => (i.text || "").trim())
+          .map(i => {
+            const out = { id: i.id || newId("i"), text: i.text.trim() };
+            if ((i.hint || "").trim()) out.hint = i.hint.trim();
+            if (safeUrl(i.link)) { out.link = i.link.trim(); out.linkText = i.linkText || i.link; }
+            return out;
+          }),
+      }))
+      .filter(g => g.items.length);
+    save.disabled = true;
+    save.textContent = "Saving…";
+    saveTemplate(cleaned).then(() => stopEditing());
+  });
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "ghost";
+  cancel.textContent = "Cancel";
+  cancel.style.marginLeft = "8px";
+  cancel.addEventListener("click", stopEditing);
+
+  actions.appendChild(addSection);
+  actions.appendChild(save);
+  actions.appendChild(cancel);
+  area.appendChild(actions);
+}
+
 document.getElementById("hireSelect").addEventListener("change", e => { currentId = e.target.value; renderHireArea(); });
 document.getElementById("newHireBtn").addEventListener("click", newHire);
 document.getElementById("removeHireBtn").addEventListener("click", removeHire);
+document.getElementById("editChecklistBtn").addEventListener("click", () => {
+  if (editingTemplate) { stopEditing(); } else { startEditing(); }
+});
 </script>
 </body>
 </html>

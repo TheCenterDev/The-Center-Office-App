@@ -67,5 +67,17 @@ service cloud.firestore {
     match /onboarding_hires/{hireId} {
       allow read, write: if isSignedIn() && hasProfile();
     }
+
+    // The onboarding checklist itself (the sections and items every new
+    // hire gets), as opposed to any one hire's ticked boxes above.
+    // Everyone signed in needs to read it to see their checklist, but
+    // editing it changes what every future hire is onboarded against,
+    // so writing is Admin/Director only. The tool hides its Edit button
+    // from everyone else, but that's only cosmetic -- anything running
+    // in a browser can be bypassed, so the real restriction is here.
+    match /onboarding_template/{docId} {
+      allow read: if isSignedIn() && hasProfile();
+      allow write: if isAdminOrDirector();
+    }
   }
 }
