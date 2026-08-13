@@ -69,6 +69,7 @@ import html.parser
 import json
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -903,6 +904,33 @@ FIRESTORE_URL = (
 NETWORK_TIMEOUT = 20  # seconds; generous, since a slow office link shouldn't fail a login
 
 
+def _build_ssl_context():
+    """HTTPS needs a list of trusted certificate authorities to verify
+    Google's certificate against. Python does not use the operating
+    system's own trust store on macOS -- it expects its own CA bundle,
+    normally supplied by the `certifi` package.
+
+    A PyInstaller build that doesn't include certifi therefore has no CA
+    bundle at all, and every HTTPS request fails certificate
+    verification. That surfaces as urllib.error.URLError, which looks
+    exactly like "no internet" from the outside, which is precisely how
+    it was first reported: the app said it couldn't reach the internet
+    on a machine whose internet was fine.
+
+    So: use certifi's bundle when it's available, otherwise fall back to
+    Python's default. Never fall back to an unverified context -- that
+    would "fix" the error by disabling the check that stops someone
+    impersonating the login server."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+SSL_CONTEXT = _build_ssl_context()
+
+
 class FirebaseError(Exception):
     """Any failure talking to Firebase. .friendly is a message safe to
     show a non-technical person; str() keeps the raw detail for the log."""
@@ -922,7 +950,9 @@ def _http_json(url, payload=None, token=None, method=None):
     if token:
         request.add_header("Authorization", "Bearer " + token)
     try:
-        with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT) as response:
+        with urllib.request.urlopen(
+            request, timeout=NETWORK_TIMEOUT, context=SSL_CONTEXT
+        ) as response:
             body = response.read().decode("utf-8")
         return json.loads(body) if body else {}
     except urllib.error.HTTPError as e:
@@ -934,6 +964,16 @@ def _http_json(url, payload=None, token=None, method=None):
             message = ""
         raise FirebaseError(_friendly_firebase_message(e.code, message), f"HTTP {e.code}: {raw}")
     except urllib.error.URLError as e:
+        # A certificate failure is NOT a connectivity failure, and saying
+        # "check your internet" when the internet is fine sends people
+        # off debugging the wrong thing entirely. Distinguish them.
+        if isinstance(getattr(e, "reason", None), ssl.SSLError):
+            raise FirebaseError(
+                "Couldn't securely verify the connection to the login server. "
+                "This is a problem with this copy of the app, not your "
+                "internet — details are in error_log.txt.",
+                f"SSL failure: {e.reason}",
+            )
         raise FirebaseError(
             "Can't reach the internet. This app needs a connection to sign in.",
             f"URLError: {e.reason}",

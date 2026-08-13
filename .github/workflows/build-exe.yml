@@ -38,7 +38,7 @@ jobs:
       # the PIL import is wrapped in try/except so the app ran fine, just
       # with every image silently missing.
       - name: Install dependencies
-        run: pip install pyinstaller customtkinter tkinterweb pywebview pillow
+        run: pip install pyinstaller customtkinter tkinterweb pywebview pillow certifi
 
       - name: Verify Pillow is importable before building
         run: python -c "from PIL import Image, ImageDraw; print('Pillow OK')"
@@ -77,7 +77,7 @@ jobs:
 
       # See the note on the Windows job above -- pillow must be explicit.
       - name: Install dependencies
-        run: pip install pyinstaller customtkinter tkinterweb pywebview pillow
+        run: pip install pyinstaller customtkinter tkinterweb pywebview pillow certifi
 
       - name: Verify Pillow is importable before building
         run: python -c "from PIL import Image, ImageDraw; print('Pillow OK')"
@@ -97,6 +97,20 @@ jobs:
             exit 1
           fi
           echo "Pillow bundled OK."
+
+      # Same reasoning as Pillow: without certifi's CA bundle, every
+      # HTTPS call fails certificate verification, which surfaces to the
+      # user as "can't reach the internet" on a machine whose internet
+      # is perfectly fine. Nobody can sign in at all. Fail the build
+      # rather than ship that again.
+      - name: Verify the certificate bundle made it into the built app
+        run: |
+          if ! find dist/TheCenterOfficeLauncher.app -iname "cacert.pem" | grep -q .; then
+            echo "certifi's cacert.pem is missing from the built app."
+            echo "Sign-in would fail with a misleading 'no internet' error."
+            exit 1
+          fi
+          echo "Certificate bundle OK."
 
       # Just the .app now -- html/ and assets/ are bundled inside it and
       # get copied into ~/Library/Application Support on first launch.
