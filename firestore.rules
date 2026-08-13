@@ -68,6 +68,17 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && hasProfile();
     }
 
+    // The recurring reporting calendar (JDAI, surveys, year-end
+    // close-out, and the ended-but-kept CCLC cycle). Everyone reads it;
+    // Admin/Director change it, since it defines obligations for the
+    // whole organisation. The "posted" document under here is written by
+    // the deadline-to-Todoist job, which runs with admin credentials in
+    // GitHub Actions and so isn't restricted by these rules.
+    match /reporting_calendar/{docId} {
+      allow read: if isSignedIn() && hasProfile();
+      allow write: if isAdminOrDirector();
+    }
+
     // The onboarding checklist itself (the sections and items every new
     // hire gets), as opposed to any one hire's ticked boxes above.
     // Everyone signed in needs to read it to see their checklist, but

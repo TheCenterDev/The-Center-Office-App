@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reporting Calendar</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+
+  select, input[type=text], input[type=email], input[type=password] {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; outline: none;
+  }
+  select:focus, input:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
+  .primary { background: var(--blue); color: #fff; }
+  .primary:disabled { background: #b9c4dd; cursor: not-allowed; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .spacer { flex: 1; }
+
+  .due { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .due:last-child { border-bottom: none; }
+  .due .when { flex: 0 0 128px; font-size: 13px; font-weight: 700; color: var(--ink); }
+  .due .what { flex: 1; font-size: 14.5px; line-height: 1.45; }
+  .due .meta { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .due.inactive .what, .due.inactive .when { color: var(--muted); }
+  .due.inactive { opacity: .72; }
+
+  .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+  .pill.jdai { background: #e8eeff; color: var(--blue); }
+  .pill.cclc { background: var(--red-bg); color: var(--red); }
+  .pill.parkview { background: var(--green-bg); color: var(--green); }
+  .pill.internal { background: #eef0f4; color: var(--muted); }
+  .pill.off { background: #eef0f4; color: var(--muted); }
+  .pill.soon { background: var(--amber-bg); color: var(--amber); }
+  .pill.overdue { background: var(--red-bg); color: var(--red); }
+
+  section.month { margin-bottom: 20px; }
+  section.month h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 4px; }
+
+  .editrow { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; flex-wrap: wrap; }
+  .editrow input[type=text] { flex: 1; min-width: 160px; }
+  .editrow select { min-width: 120px; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+
+  .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+  .topbar button { padding: 5px 10px; font-size: 12.5px; }
+
+  #authGate { max-width: 360px; margin: 60px auto; }
+  #authGate .card { text-align: center; }
+  #authGate label { text-align: left; display: block; margin-top: 10px; }
+  #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
+  #appArea { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Reporting Calendar</h1>
+  <p class="sub">Every recurring reporting obligation, with what's due next. Shared across everyone signed in, on any device.</p>
+
+  <div id="authGate">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="sub" style="margin-bottom: 14px;">Same account as the app and the mobile site.</p>
+      <form id="authForm">
+        <label>Email</label>
+        <input type="email" id="authEmail" autocomplete="username" required>
+        <label>Password</label>
+        <input type="password" id="authPassword" autocomplete="current-password" required>
+        <div id="authError"></div>
+        <button class="primary" type="submit" style="width:100%; margin-top:14px;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="appArea">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button class="ghost" id="signOutBtn" type="button">Sign out</button>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <select id="viewSelect">
+          <option value="upcoming">Coming up (next 60 days)</option>
+          <option value="year">Whole year</option>
+          <option value="all">Everything, including inactive</option>
+        </select>
+        <span class="spacer"></span>
+        <button class="ghost" id="editBtn" type="button" style="display:none;">Edit Calendar</button>
+      </div>
+    </div>
+
+    <div id="area"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="center-session.js"></script>
+<script>
+/* Recurring reporting obligations, stored in the shared database
+ * (reporting_calendar/default) so the whole organisation sees one list
+ * and an edit shows up everywhere.
+ *
+ * Seeded from the org's own "23/24 Master Data Management Calendar",
+ * which had gone unmaintained since June 2023 while the obligations it
+ * described kept running. That's the risk this replaces: one stale
+ * spreadsheet holding the only record of what's owed to whom and when.
+ *
+ * Items carry active:false rather than being deleted when an obligation
+ * stops -- the CCLC grant ended after 24/25, but if it's ever won back
+ * the whole reporting cycle is still written down instead of being
+ * reconstructed from memory. Inactive items never generate reminders.
+ */
+firebase.initializeApp({
+  apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
+  authDomain: "the-center-office-app.firebaseapp.com",
+  projectId: "the-center-office-app",
+  storageBucket: "the-center-office-app.firebasestorage.app",
+  messagingSenderId: "282726386673",
+  appId: "1:282726386673:web:bdd0c91062a7ac2d0b9250",
+  measurementId: "G-GFVPF8N6ZF",
+});
+const auth = firebase.auth();
+
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+
+/* Seed list. Wording is kept verbatim from the source sheet wherever it
+ * existed, including its own shorthand -- "Prepare Q1 CCLC
+ * Reimbursement", "Send Student Interactions updates with incentives" --
+ * so it stays recognisable to the people who wrote it. Two source rows
+ * were dated 9/31, which isn't a real date; they're recorded here as
+ * Sept 30 and flagged in the note field rather than silently changed.
+ *
+ * cadence: "monthly" = every month on that day; otherwise the month is
+ * given explicitly. day: day of month, or 0 when the sheet gave none
+ * (shown as "no set date").
+ */
+const SEED = [
+  // --- Monthly, still current -------------------------------------
+  { id: "jdai-report",   text: "Send JDAI Report including transportation and parent engagement", cadence: "monthly", day: 5, party: "JDAI", active: true },
+  { id: "jdai-students", text: "Send Student Interactions updates with incentives",               cadence: "monthly", day: 5, party: "JDAI", active: true },
+  { id: "snapshot",      text: "Monthly Program Snapshot",                                        cadence: "monthly", day: 0, party: "Internal", active: true },
+
+  // --- Quarterly / annual, still current --------------------------
+  { id: "jdai-q4",       text: "Q4 JDAI reimbursement request",            cadence: "yearly", month: 7,  day: 0, party: "JDAI", active: true },
+  { id: "stories-sep",   text: "Send out quarterly reminder about student stories form", cadence: "yearly", month: 9,  day: 0, party: "Internal", active: true },
+  { id: "stories-dec",   text: "Send out quarterly reminder about student stories form", cadence: "yearly", month: 12, day: 0, party: "Internal", active: true },
+  { id: "stories-mar",   text: "Send out quarterly reminder about student stories form", cadence: "yearly", month: 3,  day: 0, party: "Internal", active: true },
+  { id: "trax-setup",    text: "Ensure Trax is set-up before programming starts", cadence: "yearly", month: 8, day: 15, party: "Internal", active: true },
+  { id: "survey-sched",  text: "Schedule survey days for October/November across all programs/locations", cadence: "yearly", month: 8, day: 31, party: "Internal", active: true },
+  { id: "fall-survey",   text: "Fall Survey",                              cadence: "yearly", month: 10, day: 0, party: "Internal", active: true },
+  { id: "dev-rel",       text: "Developmental relationships and religiousity & spirituality surveys", cadence: "yearly", month: 11, day: 30, party: "Internal", active: true },
+  { id: "midyear",       text: "Mid-Year Engagement Summary",              cadence: "yearly", month: 12, day: 0, party: "Internal", active: true },
+  { id: "spring-survey", text: "Spring Survey",                            cadence: "yearly", month: 3,  day: 0, party: "Internal", active: true },
+  { id: "whitko-eval",   text: "Pull good data from Whitko Evaluation Report", cadence: "yearly", month: 7, day: 15, party: "Internal", active: true },
+  { id: "summer-survey", text: "Analyze summer pre/post trip survey",      cadence: "yearly", month: 7,  day: 0, party: "Internal", active: true },
+  { id: "eoy-interactions", text: "Compile end of year student interactions numbers", cadence: "yearly", month: 7, day: 0, party: "Internal", active: true },
+  { id: "location-map",  text: "Location mapping where all students lived for the previous year, including county breakdown", cadence: "yearly", month: 6, day: 0, party: "Internal", active: true },
+  { id: "close-enroll",  text: "Close out previous years student enrollment history chart", cadence: "yearly", month: 6, day: 0, party: "Internal", active: true },
+  { id: "close-engage",  text: "Close out previous years student engagement summary", cadence: "yearly", month: 6, day: 0, party: "Internal", active: true },
+  { id: "close-inter",   text: "Close out student interactions for previous year", cadence: "yearly", month: 6, day: 0, party: "Internal", active: true },
+  { id: "rap-reports",   text: "Run RAP reports with desired spring/fall survey related data", cadence: "yearly", month: 6, day: 0, party: "Internal", active: true },
+  { id: "frl-report",    text: "Free/reduced lunch report",                cadence: "yearly", month: 6,  day: 0, party: "Internal", active: true },
+  { id: "btn-review",    text: "Year End Data Review: highlights into By The Numbers Doc", cadence: "yearly", month: 7, day: 0, party: "Internal", active: true },
+
+  // --- CCLC: grant ended after 24/25, kept but switched off --------
+  { id: "cclc-q1", text: "Prepare Q1 CCLC Reimbursement", cadence: "yearly", month: 10, day: 10, party: "CCLC", active: false, note: "21st CCLC (Cohort 10) ended after 24/25 — see the 26/27 budget's Lost Funds tab. Kept in case the grant is won back." },
+  { id: "cclc-q2", text: "Prepare Q2 CCLC Reimbursement", cadence: "yearly", month: 1,  day: 10, party: "CCLC", active: false },
+  { id: "cclc-q3", text: "Prepare Q3 CCLC Reimbursement", cadence: "yearly", month: 4,  day: 10, party: "CCLC", active: false },
+  { id: "cclc-q4", text: "Prepare Q4 CCLC Reimbursement", cadence: "yearly", month: 7,  day: 10, party: "CCLC", active: false },
+  { id: "cclc-final", text: "Prior fiscal year final CCLC reimbursement request", cadence: "yearly", month: 8, day: 15, party: "CCLC", active: false },
+  { id: "cclc-amend", text: "CCLC Budget Ammendment, if needed", cadence: "yearly", month: 7, day: 31, party: "CCLC", active: false },
+  { id: "cclc-eoy", text: "Previous fiscal year CCLC End of Year Reports", cadence: "yearly", month: 9, day: 30, party: "CCLC", active: false, note: "Source sheet said 9/31, which isn't a real date — recorded as Sept 30." },
+  { id: "cclc-cayen", text: "Set up new school year in Cayen", cadence: "yearly", month: 9, day: 30, party: "CCLC", active: false, note: "Source sheet said 9/31, which isn't a real date — recorded as Sept 30." },
+  { id: "cclc-check", text: "CCLC Initial Data Check", cadence: "yearly", month: 10, day: 15, party: "CCLC", active: false },
+  { id: "cclc-grades", text: "CCLC - report student grades and test scores", cadence: "yearly", month: 6, day: 0, party: "CCLC", active: false },
+];
+
+let items = [];
+let stopWatching = null;
+let canEdit = false;
+let editing = false;
+let draft = null;
+
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// ---------------------------------------------------------- dates --
+
+/** Next occurrence of an item on/after today, or null if it has no set
+ *  date (those are real in the source sheet -- "sometime in June"). */
+function nextDue(item, from) {
+  if (!item.day) return null;
+  const today = from || new Date();
+  const y = today.getFullYear();
+  function candidate(year, monthIndex) {
+    const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+    return new Date(year, monthIndex, Math.min(item.day, lastDay));
+  }
+  if (item.cadence === "monthly") {
+    let d = candidate(y, today.getMonth());
+    if (d < stripTime(today)) d = candidate(y, today.getMonth() + 1);
+    return d;
+  }
+  const m = (item.month || 1) - 1;
+  let d = candidate(y, m);
+  if (d < stripTime(today)) d = candidate(y + 1, m);
+  return d;
+}
+
+function stripTime(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function daysUntil(d) { return Math.round((stripTime(d) - stripTime(new Date())) / 86400000); }
+function formatDate(d) {
+  return MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate();
+}
+
+// ----------------------------------------------------------- data --
+
+function startApp(profile) {
+  canEdit = profile.role === "admin" || profile.role === "director";
+  document.getElementById("editBtn").style.display = canEdit ? "" : "none";
+  document.getElementById("whoami").textContent = "Signed in as " + (profile.name || profile.email);
+  document.getElementById("authGate").style.display = "none";
+  document.getElementById("appArea").style.display = "block";
+  watch();
+}
+
+if (CenterSession.isHandedOver()) {
+  const signOut = document.getElementById("signOutBtn");
+  if (signOut) signOut.style.display = "none";
+  startApp(CenterSession.user());
+} else {
+  auth.onAuthStateChanged(user => {
+    if (stopWatching) { stopWatching(); stopWatching = null; }
+    if (!user) {
+      document.getElementById("authGate").style.display = "block";
+      document.getElementById("appArea").style.display = "none";
+      return;
+    }
+    CenterSession.getDoc("users", user.email.trim().toLowerCase()).then(profile => {
+      if (!profile) {
+        document.getElementById("authError").textContent =
+          "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you.";
+        return;
+      }
+      profile.email = user.email;
+      startApp(profile);
+    });
+  });
+}
+
+function watch() {
+  stopWatching = CenterSession.watchDoc("reporting_calendar", "default", doc => {
+    if (!doc) {
+      if (canEdit) {
+        CenterSession.setDoc("reporting_calendar", "default", { items: SEED }).catch(() => {});
+      }
+      items = [];
+      render();
+      return;
+    }
+    items = doc.items || [];
+    render();
+  }, err => {
+    document.getElementById("area").innerHTML =
+      '<div class="empty">Couldn\'t load the calendar: ' + esc(err.message) + "</div>";
+  });
+}
+
+function save(next) {
+  return CenterSession.setDoc("reporting_calendar", "default", { items: next })
+    .catch(err => { alert("Couldn't save: " + err.message); });
+}
+
+document.getElementById("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  document.getElementById("authError").textContent = "";
+  auth.signInWithEmailAndPassword(
+    document.getElementById("authEmail").value.trim(),
+    document.getElementById("authPassword").value
+  ).catch(err => { document.getElementById("authError").textContent = err.message; });
+});
+document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
+document.getElementById("viewSelect").addEventListener("change", render);
+document.getElementById("editBtn").addEventListener("click", () => {
+  if (editing) { editing = false; draft = null; }
+  else { editing = true; draft = JSON.parse(JSON.stringify(items)); }
+  render();
+});
+
+// --------------------------------------------------------- render --
+
+function partyPill(party) {
+  const key = (party || "Internal").toLowerCase();
+  const cls = key === "jdai" ? "jdai" : key === "cclc" ? "cclc"
+            : key === "parkview" ? "parkview" : "internal";
+  return '<span class="pill ' + cls + '">' + esc(party || "Internal") + "</span>";
+}
+
+function render() {
+  const area = document.getElementById("area");
+  area.innerHTML = "";
+  if (editing) return renderEditor(area);
+
+  const view = document.getElementById("viewSelect").value;
+  const showInactive = view === "all";
+  const live = items.filter(i => showInactive || i.active !== false);
+
+  if (!live.length) {
+    area.innerHTML = '<div class="empty">Nothing here yet.</div>';
+    return;
+  }
+
+  if (view === "upcoming") {
+    const rows = live
+      .map(i => ({ item: i, due: nextDue(i) }))
+      .filter(r => r.due && daysUntil(r.due) <= 60)
+      .sort((a, b) => a.due - b.due);
+    const undated = live.filter(i => !i.day);
+
+    const card = document.createElement("div");
+    card.className = "card";
+    let html = "<h2 style='font-size:15px;margin-bottom:10px;'>Coming up</h2>";
+    if (!rows.length) html += '<div class="note">Nothing due in the next 60 days.</div>';
+    rows.forEach(r => {
+      const d = daysUntil(r.due);
+      const urgency = d <= 7 ? '<span class="pill soon">' + (d === 0 ? "today" : d + "d") + "</span>" : "";
+      html += '<div class="due"><div class="when">' + formatDate(r.due) + urgency + "</div>" +
+        '<div class="what">' + esc(r.item.text) + partyPill(r.item.party) +
+        (r.item.note ? '<span class="meta">' + esc(r.item.note) + "</span>" : "") +
+        "</div></div>";
+    });
+    card.innerHTML = html;
+    area.appendChild(card);
+
+    if (undated.length) {
+      const c2 = document.createElement("div");
+      c2.className = "card";
+      let h2 = "<h2 style='font-size:15px;margin-bottom:6px;'>No set date</h2>" +
+        '<div class="note" style="margin-bottom:8px;">The source calendar listed these without a day. They still happen — they just need a date agreed.</div>';
+      undated.forEach(i => {
+        h2 += '<div class="due"><div class="when">' +
+          (i.cadence === "monthly" ? "Monthly" : MONTHS[(i.month || 1) - 1]) + "</div>" +
+          '<div class="what">' + esc(i.text) + partyPill(i.party) + "</div></div>";
+      });
+      c2.innerHTML = h2;
+      area.appendChild(c2);
+    }
+    return;
+  }
+
+  // Year view: grouped by month, monthly items shown once at the top.
+  const monthly = live.filter(i => i.cadence === "monthly");
+  if (monthly.length) {
+    const card = document.createElement("div");
+    card.className = "card";
+    let html = "<h2 style='font-size:15px;margin-bottom:10px;'>Every month</h2>";
+    monthly.forEach(i => {
+      html += '<div class="due' + (i.active === false ? " inactive" : "") + '">' +
+        '<div class="when">' + (i.day ? "Day " + i.day : "No set date") + "</div>" +
+        '<div class="what">' + esc(i.text) + partyPill(i.party) +
+        (i.active === false ? '<span class="pill off">inactive</span>' : "") + "</div></div>";
+    });
+    card.innerHTML = html;
+    area.appendChild(card);
+  }
+
+  for (let m = 1; m <= 12; m++) {
+    const inMonth = live.filter(i => i.cadence !== "monthly" && (i.month || 1) === m);
+    if (!inMonth.length) continue;
+    const sec = document.createElement("section");
+    sec.className = "month card";
+    let html = "<h2>" + MONTHS[m - 1] + "</h2>";
+    inMonth.sort((a, b) => (a.day || 99) - (b.day || 99)).forEach(i => {
+      html += '<div class="due' + (i.active === false ? " inactive" : "") + '">' +
+        '<div class="when">' + (i.day ? MONTHS[m - 1].slice(0, 3) + " " + i.day : "No set date") + "</div>" +
+        '<div class="what">' + esc(i.text) + partyPill(i.party) +
+        (i.active === false ? '<span class="pill off">inactive</span>' : "") +
+        (i.note ? '<span class="meta">' + esc(i.note) + "</span>" : "") + "</div></div>";
+    });
+    sec.innerHTML = html;
+    area.appendChild(sec);
+  }
+}
+
+// --------------------------------------------------------- editor --
+
+function renderEditor(area) {
+  const intro = document.createElement("div");
+  intro.className = "card";
+  intro.innerHTML = "<h2 style='margin-top:0;font-size:16px;'>Editing the calendar</h2>" +
+    '<div class="note">Turning something off keeps it here but stops all reminders — use that when an obligation ends, ' +
+    "so the cycle is still written down if it ever comes back. Nothing saves until you click Save.</div>";
+  area.appendChild(intro);
+
+  const card = document.createElement("div");
+  card.className = "card";
+
+  draft.forEach((item, index) => {
+    const row = document.createElement("div");
+    row.className = "editrow";
+
+    const text = document.createElement("input");
+    text.type = "text"; text.value = item.text || ""; text.placeholder = "What's due";
+    text.addEventListener("input", () => { draft[index].text = text.value; });
+
+    const cadence = document.createElement("select");
+    [["monthly", "Every month"], ["yearly", "Once a year"]].forEach(([v, l]) => {
+      const o = document.createElement("option"); o.value = v; o.textContent = l;
+      if ((item.cadence || "yearly") === v) o.selected = true; cadence.appendChild(o);
+    });
+    cadence.addEventListener("change", () => { draft[index].cadence = cadence.value; render(); });
+
+    const month = document.createElement("select");
+    MONTHS.forEach((name, i) => {
+      const o = document.createElement("option"); o.value = String(i + 1); o.textContent = name;
+      if ((item.month || 1) === i + 1) o.selected = true; month.appendChild(o);
+    });
+    month.addEventListener("change", () => { draft[index].month = parseInt(month.value, 10); });
+    month.style.display = (item.cadence === "monthly") ? "none" : "";
+
+    const day = document.createElement("select");
+    const noDay = document.createElement("option");
+    noDay.value = "0"; noDay.textContent = "No set date";
+    day.appendChild(noDay);
+    for (let d = 1; d <= 31; d++) {
+      const o = document.createElement("option"); o.value = String(d); o.textContent = "Day " + d;
+      if ((item.day || 0) === d) o.selected = true; day.appendChild(o);
+    }
+    if (!item.day) noDay.selected = true;
+    day.addEventListener("change", () => { draft[index].day = parseInt(day.value, 10); });
+
+    const party = document.createElement("select");
+    ["Internal", "JDAI", "CCLC", "Parkview", "Board", "Other"].forEach(p => {
+      const o = document.createElement("option"); o.value = p; o.textContent = p;
+      if ((item.party || "Internal") === p) o.selected = true; party.appendChild(o);
+    });
+    party.addEventListener("change", () => { draft[index].party = party.value; });
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = item.active === false ? "ghost" : "primary";
+    toggle.textContent = item.active === false ? "Off" : "On";
+    toggle.title = "Whether this generates reminders";
+    toggle.addEventListener("click", () => {
+      draft[index].active = !(item.active !== false) ? true : false;
+      render();
+    });
+
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "danger"; del.textContent = "✕";
+    del.title = "Remove entirely";
+    del.addEventListener("click", () => {
+      if (!confirm('Remove "' + (item.text || "this item") + '" completely? Turning it Off instead keeps the record.')) return;
+      draft.splice(index, 1); render();
+    });
+
+    [text, cadence, month, day, party, toggle, del].forEach(el => row.appendChild(el));
+    card.appendChild(row);
+  });
+
+  const add = document.createElement("button");
+  add.type = "button"; add.className = "ghost"; add.textContent = "+ Add obligation";
+  add.addEventListener("click", () => {
+    draft.push({ id: "r" + Date.now().toString(36), text: "", cadence: "yearly", month: 1, day: 0, party: "Internal", active: true });
+    render();
+  });
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button"; saveBtn.className = "primary"; saveBtn.textContent = "Save Calendar";
+  saveBtn.style.marginLeft = "8px";
+  saveBtn.addEventListener("click", () => {
+    const cleaned = draft
+      .filter(i => (i.text || "").trim())
+      .map(i => {
+        const out = {
+          id: i.id || ("r" + Date.now().toString(36)),
+          text: i.text.trim(),
+          cadence: i.cadence === "monthly" ? "monthly" : "yearly",
+          day: parseInt(i.day || 0, 10) || 0,
+          party: i.party || "Internal",
+          active: i.active !== false,
+        };
+        if (out.cadence === "yearly") out.month = parseInt(i.month || 1, 10);
+        if ((i.note || "").trim()) out.note = i.note.trim();
+        return out;
+      });
+    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    save(cleaned).then(() => { editing = false; draft = null; render(); });
+  });
+
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "ghost"; cancel.textContent = "Cancel";
+  cancel.style.marginLeft = "8px";
+  cancel.addEventListener("click", () => { editing = false; draft = null; render(); });
+
+  const actions = document.createElement("div");
+  actions.className = "card";
+  actions.appendChild(add); actions.appendChild(saveBtn); actions.appendChild(cancel);
+
+  area.appendChild(card);
+  area.appendChild(actions);
+}
+</script>
+</body>
+</html>

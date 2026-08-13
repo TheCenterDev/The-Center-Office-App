@@ -50,3 +50,14 @@ jobs:
           TODOIST_API_TOKEN: ${{ secrets.TODOIST_API_TOKEN }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/sync_todoist.js
+
+      # Recurring reporting deadlines (JDAI, surveys, year-end close-out)
+      # become tasks ahead of their due date. Runs even if the step above
+      # failed, so one broken maintenance entry can't silently stop
+      # deadline reminders for the whole organisation.
+      - name: Schedule upcoming reporting deadlines
+        if: always()
+        env:
+          TODOIST_API_TOKEN: ${{ secrets.TODOIST_API_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/sync_calendar_todoist.js
