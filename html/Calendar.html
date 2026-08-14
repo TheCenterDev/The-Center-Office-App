@@ -12,13 +12,14 @@
     --red: #b3261e; --red-bg: #fdecea;
     --amber: #8a5a00; --amber-bg: #fff4d6;
     --purple: #5b3fa8; --purple-bg: #efe9fb;
+    --cell: 108px;
   }
   * { box-sizing: border-box; margin: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg); color: var(--ink); padding: 24px 16px 60px;
   }
-  .wrap { max-width: 900px; margin: 0 auto; }
+  .wrap { max-width: 940px; margin: 0 auto; }
   h1 { font-size: 20px; margin-bottom: 4px; }
   .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 18px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; }
@@ -34,6 +35,7 @@
   .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
   .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
   button:disabled { opacity: .45; cursor: not-allowed; }
+  a { color: var(--blue); }
 
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 150px; }
@@ -44,6 +46,7 @@
   .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
   .empty { text-align: center; color: var(--muted); padding: 28px 16px; font-size: 14px; }
   .saved { font-size: 12.5px; color: var(--green); min-height: 18px; }
+  .warn { color: var(--red); }
 
   .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
   .topbar button { padding: 5px 10px; font-size: 12.5px; }
@@ -57,34 +60,46 @@
   .tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 7px 14px; font-size: 13px; }
   .tabs button.on { background: var(--blue); color: #fff; border-color: var(--blue); }
 
-  /* ---- month grid ---- */
-  .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--line);
+  /* ---- month grid ----
+     Every cell is exactly one row tall, whatever is in it. Sizing rows
+     to their contents made an empty week collapse to the height of the
+     date number while a busy one ballooned, which stopped looking like
+     a calendar at all. Anything that doesn't fit becomes "+N more" and
+     is read by opening the day. */
+  .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+          grid-auto-rows: var(--cell); gap: 1px; background: var(--line);
           border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .dow { background: #fbfcfd; text-align: center; font-size: 11px; font-weight: 800;
-         text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 7px 2px; }
-  .day { background: #fff; min-height: 92px; padding: 5px 5px 7px; cursor: pointer; }
-  .day:hover { background: #fafbfe; }
+         text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+         padding: 7px 2px; }
+  .grid .dowrow { grid-row: auto; }
+  .headrow { display: contents; }
+  .day { background: #fff; padding: 4px 5px 5px; cursor: pointer; overflow: hidden;
+         display: flex; flex-direction: column; min-width: 0; }
+  .day:hover { background: #f4f7fe; }
+  .day:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
   .day.other { background: #fbfbfc; }
   .day.other .daynum { color: #c3c8d2; }
-  .day.today .daynum { background: var(--blue); color: #fff; border-radius: 999px; }
-  .day.picked { outline: 2px solid var(--blue); outline-offset: -2px; }
-  .daynum { display: inline-block; min-width: 22px; height: 22px; line-height: 22px; text-align: center;
-            font-size: 12.5px; font-weight: 700; margin-bottom: 3px; }
-  .chip { display: block; font-size: 11.5px; line-height: 1.3; padding: 2px 5px; border-radius: 5px;
+  .day.today .daynum { background: var(--blue); color: #fff; }
+  .daynum { flex: 0 0 auto; align-self: flex-start; min-width: 21px; height: 21px;
+            line-height: 21px; text-align: center; border-radius: 999px;
+            font-size: 12px; font-weight: 700; margin-bottom: 2px; padding: 0 5px; }
+  .chips { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .chip { display: block; font-size: 11px; line-height: 1.35; padding: 1px 5px; border-radius: 5px;
           margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chip.team { background: var(--blue-soft); color: var(--blue); }
   .chip.direct { background: var(--purple-bg); color: var(--purple); }
   .chip.private { background: #eef0f4; color: #4a5164; }
   .chip.due { background: var(--amber-bg); color: var(--amber); }
-  .more { font-size: 10.5px; color: var(--muted); padding-left: 5px; }
+  .more { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; color: var(--blue); padding-left: 5px; }
 
   /* ---- event list ---- */
   .ev { padding: 12px 0; border-bottom: 1px solid var(--line); }
   .ev:last-child { border-bottom: none; }
   .ev h3 { font-size: 14.5px; margin-bottom: 3px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
   .ev .when { font-size: 12.5px; color: var(--muted); }
-  .ev .body { font-size: 13.5px; color: #333a4d; margin-top: 5px; white-space: pre-wrap; }
-  .ev .meta { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+  .ev .body { font-size: 13.5px; color: #333a4d; margin-top: 5px; white-space: pre-wrap; word-break: break-word; }
+  .ev .meta { font-size: 11.5px; color: var(--muted); margin-top: 5px; word-break: break-word; }
   .ev .actions { margin-top: 8px; display: flex; gap: 8px; }
   .ev .actions button { padding: 5px 11px; font-size: 12px; }
   .pill { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
@@ -98,10 +113,34 @@
               color: var(--muted); margin: 16px 0 2px; }
   .daygroup:first-child { margin-top: 0; }
 
+  /* ---- day zoom ---- */
+  .overlay { position: fixed; inset: 0; background: rgba(20, 26, 40, .45);
+             display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+  .overlay[hidden] { display: none; }
+  .sheet { background: var(--card); border-radius: 16px; width: 100%; max-width: 560px;
+           max-height: 86vh; overflow-y: auto; padding: 20px 22px 22px;
+           box-shadow: 0 18px 48px rgba(16, 22, 40, .25); }
+  .sheethead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .sheethead .big { font-size: 19px; font-weight: 800; }
+  .sheethead .small { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .closebtn { background: transparent; color: var(--muted); font-size: 20px; padding: 2px 8px; line-height: 1; }
+
   #peopleWrap { display: none; margin-top: 10px; }
   #peopleList { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 4px; }
   #peopleList label { display: flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 500; }
   #peopleList input[type=checkbox] { width: auto; }
+
+  /* ---- bulk upload ---- */
+  .foldhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; }
+  .foldhead h2 { border: none; margin: 0; padding: 0; }
+  #importBody { display: none; margin-top: 14px; }
+  table.preview { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 12px; }
+  table.preview th, table.preview td { text-align: left; padding: 6px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.preview th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr.bad td { background: var(--red-bg); }
+  td.why { color: var(--red); font-size: 11.5px; }
+  code { background: #f0f2f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .cols { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
 
   #authGate { max-width: 360px; margin: 60px auto; }
   #authGate .card { text-align: center; }
@@ -109,16 +148,19 @@
   #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
   #appArea { display: none; }
 
-  @media (max-width: 620px) {
-    .day { min-height: 68px; }
-    .chip { font-size: 10.5px; }
+  @media (max-width: 640px) {
+    :root { --cell: 78px; }
+    body { padding: 16px 10px 50px; }
+    .card { padding: 14px 13px; }
+    .chip { font-size: 10px; padding: 1px 4px; }
+    .daynum { font-size: 11.5px; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Calendar</h1>
-  <p class="sub">Dates for yourself, for specific people, or for the whole team. Anything due soon shows up as a reminder when you open the app.</p>
+  <p class="sub">Dates for yourself, for specific people, or for the whole team. Click any day to open it. Anything due soon shows up as a reminder when you open the app.</p>
 
   <div id="authGate">
     <div class="card">
@@ -145,9 +187,9 @@
       <div class="monthbar">
         <div class="title" id="monthTitle"></div>
         <div class="navbtns">
-          <button class="ghost" id="prevBtn" type="button">‹</button>
+          <button class="ghost" id="prevBtn" type="button" aria-label="Previous month">‹</button>
           <button class="ghost" id="todayBtn" type="button">Today</button>
-          <button class="ghost" id="nextBtn" type="button">›</button>
+          <button class="ghost" id="nextBtn" type="button" aria-label="Next month">›</button>
         </div>
         <div class="tabs" id="viewTabs">
           <button type="button" data-view="month" class="on">Month</button>
@@ -163,11 +205,6 @@
       <div id="upcomingView" style="display:none;">
         <div id="upcomingList"></div>
       </div>
-    </div>
-
-    <div class="card" id="dayCard" style="display:none;">
-      <h2 id="dayTitle">Day</h2>
-      <div id="dayList"></div>
     </div>
 
     <div class="card">
@@ -209,7 +246,7 @@
         </div>
         <div class="field">
           <label for="evLocation">Where (optional)</label>
-          <input type="text" id="evLocation" placeholder="e.g. Columbia City" autocomplete="off">
+          <input type="text" id="evLocation" placeholder="e.g. Columbia City, or a meeting link" autocomplete="off">
         </div>
       </div>
 
@@ -220,7 +257,7 @@
 
       <div class="field" style="margin-top:12px;">
         <label for="evNotes">Notes (optional)</label>
-        <textarea id="evNotes" placeholder="Anything worth remembering about this"></textarea>
+        <textarea id="evNotes" placeholder="Email addresses, phone numbers and links in here become clickable"></textarea>
       </div>
 
       <div class="row" style="margin-top:14px; align-items:center;">
@@ -228,6 +265,61 @@
         <span class="saved" id="saveMsg"></span>
       </div>
       <div class="note" id="privacyNote"></div>
+    </div>
+
+    <div class="card">
+      <div class="foldhead" id="importHead">
+        <h2>Upload a lot of dates at once</h2>
+        <button class="ghost" type="button" id="importToggle">Open</button>
+      </div>
+      <div id="importBody">
+        <p class="sub" style="margin-bottom:10px;">
+          Fill in the template, then drop the file here. A spreadsheet saved as
+          <strong>CSV</strong> is read exactly; a <strong>PDF</strong> also works but is
+          reconstructed from the page, so check the preview before importing.
+        </p>
+        <div class="cols">
+          Columns, in this order — only <strong>Date</strong> and <strong>Title</strong> are required:<br>
+          <code>Date</code> <code>Time</code> <code>Title</code> <code>Who sees it</code>
+          <code>For (emails)</code> <code>Where</code> <code>Notes</code> <code>Remind (days before)</code><br>
+          <a href="https://docs.google.com/spreadsheets/d/159UOAir1EyDJKEf6KiR3npDq0vc4jQOqPCV0nqNIFE0/edit"
+             target="_blank" rel="noopener noreferrer">Open the template in Google Sheets</a>
+          — make a copy, fill it in, then <em>File → Download → CSV</em>.
+        </div>
+
+        <div class="row" style="margin-top:14px;">
+          <div class="field">
+            <label for="importFile">Choose a file</label>
+            <input type="file" id="importFile" accept=".csv,.tsv,.txt,.pdf" style="padding:7px;">
+          </div>
+        </div>
+        <div class="field" style="margin-top:12px;">
+          <label for="importPaste">…or paste the rows straight from the spreadsheet</label>
+          <textarea id="importPaste" placeholder="Paste here, including the header row" style="min-height:80px;"></textarea>
+        </div>
+        <div class="row" style="margin-top:10px; align-items:center;">
+          <button class="ghost" type="button" id="importPreviewBtn">Check it</button>
+          <button class="primary" type="button" id="importGoBtn" disabled>Import</button>
+          <span class="saved" id="importMsg"></span>
+        </div>
+        <div id="importPreview"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="dayOverlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheethead">
+      <div>
+        <div class="big" id="sheetTitle"></div>
+        <div class="small" id="sheetSub"></div>
+      </div>
+      <button class="closebtn" type="button" id="sheetClose" aria-label="Close">✕</button>
+    </div>
+    <div id="sheetList"></div>
+    <div class="row" style="margin-top:14px;">
+      <button class="primary" type="button" id="sheetAdd">Add something on this day</button>
     </div>
   </div>
 </div>
@@ -254,9 +346,7 @@
  * The recurring reporting obligations (JDAI, surveys, year-end
  * close-out) are read from reporting_calendar and drawn on the grid
  * read-only. They are edited in the Reporting Calendar tool, which
- * stays the one place those are defined -- showing them here is so
- * "what's coming up" is answerable in a single place, not so there are
- * two lists to keep in step.
+ * stays the one place those are defined.
  */
 firebase.initializeApp({
   apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
@@ -272,7 +362,8 @@ const auth = firebase.auth();
 const MONTHS = ["January","February","March","April","May","June",
                 "July","August","September","October","November","December"];
 const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const MAX_CHIPS = 3;
+const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 let me = null;
 let events = [];
@@ -280,13 +371,73 @@ let obligations = [];      // from reporting_calendar, read-only
 let people = [];
 let stopWatching = null;
 let cursor = new Date();   // which month the grid is showing
-let picked = null;         // "YYYY-MM-DD" of the selected day, or null
+let openDay = null;        // "YYYY-MM-DD" currently zoomed into, or null
 let view = "month";
+let pendingImport = [];
 
 function esc(v) {
   return String(v == null ? "" : v)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/* Turns plain text into HTML with the addresses, phone numbers and
+ * links in it clickable.
+ *
+ * Deliberately built by tokenising the raw text and escaping each piece
+ * as it goes, rather than escaping first and pattern-matching after:
+ * escaping rewrites & into &amp;, which corrupts any URL containing a
+ * query string. Only http, https, mailto and tel are ever emitted, so a
+ * "javascript:" written into a note stays inert text. */
+const LINK_RE = new RegExp([
+  "(https?:\\/\\/[^\\s<>\"']+)",                          // full URLs
+  "(www\\.[^\\s<>\"']+)",                                 // bare www.
+  "([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})",    // email
+  "(\\+?1[-. ]?)?(\\(?\\d{3}\\)?[-. ]\\d{3}[-. ]\\d{4})", // US phone
+].join("|"), "g");
+
+function linkify(text) {
+  const raw = String(text == null ? "" : text);
+  let out = "";
+  let last = 0;
+  raw.replace(LINK_RE, function (whole, url, www, email, _p1, phone, offset) {
+    out += esc(raw.slice(last, offset));
+
+    // Trailing sentence punctuation is almost never part of the link.
+    // Held in a separate variable rather than reassigning the match:
+    // in sloppy mode the parameters alias the arguments object, so
+    // shortening it here also shortened what we advance past below,
+    // and the stripped character got emitted a second time.
+    let text = whole;
+    let trail = "";
+    while (/[.,;:!?\]]$/.test(text) || (text.endsWith(")") && !text.includes("("))) {
+      trail = text.slice(-1) + trail;
+      text = text.slice(0, -1);
+    }
+
+    let href = null;
+    if (url) href = text;
+    else if (www) href = "https://" + text;
+    else if (email) href = "mailto:" + text;
+    else if (phone) {
+      // Ten digits means a US number with the country code left off,
+      // which some dialers won't handle on their own.
+      const digits = text.replace(/[^\d]/g, "");
+      href = "tel:" + (digits.length === 10 ? "+1" + digits : "+" + digits);
+    }
+
+    if (href && /^(https?:|mailto:|tel:)/i.test(href)) {
+      out += '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' +
+        esc(text) + "</a>";
+    } else {
+      out += esc(text);
+    }
+    out += esc(trail);
+    last = offset + whole.length;
+    return whole;
+  });
+  out += esc(raw.slice(last));
+  return out;
 }
 
 // ------------------------------------------------------------ dates --
@@ -295,8 +446,7 @@ function esc(v) {
 // Date. Dates here mean a calendar day, not an instant: an event on the
 // 5th is on the 5th regardless of what timezone the phone thinks it is
 // in, and parsing "2026-08-05" with new Date() would make it midnight
-// UTC, which is the 4th once you're west of Greenwich. Strings compare
-// correctly with < and >, so they're also easier to sort.
+// UTC, which is the 4th once you're west of Greenwich.
 
 function key(d) {
   return d.getFullYear() + "-" +
@@ -323,6 +473,10 @@ function humanDay(k) {
   if (diff === -1) return "Yesterday";
   const d = parseKey(k);
   return DOW[d.getDay()] + ", " + MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate();
+}
+function longDay(k) {
+  const d = parseKey(k);
+  return DOW[d.getDay()] + ", " + MONTHS[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear();
 }
 function humanTime(t) {
   if (!t) return "";
@@ -425,11 +579,10 @@ function watch() {
   });
 }
 
-/* Reporting obligations that land in a given month, as pseudo-events.
- * A monthly obligation lands every month; a yearly one only in its own
- * month. Items with no specific day (day 0) are skipped -- the
- * Reporting Calendar treats those as "sometime that month", and
- * inventing a date for them here would be making something up. */
+/* Reporting obligations landing in a given month, as pseudo-events.
+ * Items with no specific day are skipped -- the Reporting Calendar
+ * treats those as "sometime that month", and inventing a date for them
+ * here would be making something up. */
 function obligationsIn(year, monthIndex) {
   const lastDay = new Date(year, monthIndex + 1, 0).getDate();
   const out = [];
@@ -487,6 +640,18 @@ function chosenRecipients() {
   return Array.from(document.querySelectorAll(".recipient:checked")).map(cb => cb.value);
 }
 
+function newId() {
+  return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function saveEvent(fields) {
+  const now = new Date().toISOString();
+  return CenterSession.setDoc("calendar_events", newId(), Object.assign({
+    time: "", location: "", notes: "", recipients: [], remindDays: 0,
+    author: me.email, authorName: me.name, created: now, updated: now,
+  }, fields));
+}
+
 document.getElementById("saveBtn").addEventListener("click", () => {
   const title = document.getElementById("evTitle").value.trim();
   const date = document.getElementById("evDate").value;
@@ -501,11 +666,8 @@ document.getElementById("saveBtn").addEventListener("click", () => {
     return;
   }
 
-  const now = new Date().toISOString();
-  const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   msg.textContent = "Saving…";
-
-  CenterSession.setDoc("calendar_events", id, {
+  saveEvent({
     title: title,
     date: date,
     time: document.getElementById("evTime").value || "",
@@ -514,10 +676,6 @@ document.getElementById("saveBtn").addEventListener("click", () => {
     visibility: visibility,
     recipients: recipients,
     remindDays: parseInt(document.getElementById("evRemind").value, 10) || 0,
-    author: me.email,
-    authorName: me.name,
-    created: now,
-    updated: now,
   }).then(() => {
     document.getElementById("evTitle").value = "";
     document.getElementById("evTime").value = "";
@@ -561,12 +719,23 @@ function render() {
     b.className = b.getAttribute("data-view") === view ? "on" : "";
   });
   if (view === "month") renderGrid(); else renderUpcoming();
-  renderDay();
+  if (openDay) renderSheet();
 }
 
-function eventsOn(k, extra) {
-  const all = events.concat(extra || []);
-  return all.filter(e => e.date === k);
+function allOn(k) {
+  const d = parseKey(k);
+  return events.concat(obligationsIn(d.getFullYear(), d.getMonth()))
+    .filter(e => e.date === k)
+    .sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")));
+}
+
+/* How many chips fit in a cell, worked out from the cell height rather
+ * than hardcoded, so the phone layout (a much shorter cell) doesn't end
+ * up claiming "+2 more" while showing empty space. */
+function chipCapacity() {
+  const cell = parseInt(getComputedStyle(document.documentElement)
+    .getPropertyValue("--cell"), 10) || 108;
+  return Math.max(1, Math.floor((cell - 26) / 18));
 }
 
 function renderGrid() {
@@ -577,6 +746,7 @@ function renderGrid() {
   const start = new Date(year, monthIndex, 1 - first.getDay());
   const grid = document.getElementById("grid");
   const today = todayKey();
+  const capacity = chipCapacity();
 
   grid.innerHTML = "";
   DOW.forEach(d => {
@@ -586,45 +756,53 @@ function renderGrid() {
     grid.appendChild(el);
   });
 
+  // Six weeks always, so the grid doesn't change height month to month.
   for (let i = 0; i < 42; i++) {
     const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
     const k = key(d);
     const cell = document.createElement("div");
     cell.className = "day" +
       (d.getMonth() !== monthIndex ? " other" : "") +
-      (k === today ? " today" : "") +
-      (k === picked ? " picked" : "");
+      (k === today ? " today" : "");
+    cell.tabIndex = 0;
+    cell.setAttribute("role", "button");
 
     const num = document.createElement("div");
     num.className = "daynum";
     num.textContent = d.getDate();
     cell.appendChild(num);
 
-    const items = eventsOn(k, due);
-    items.slice(0, MAX_CHIPS).forEach(ev => {
+    const items = events.concat(due)
+      .filter(e => e.date === k)
+      .sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")));
+
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    const shown = items.length > capacity ? capacity - 1 : items.length;
+    items.slice(0, Math.max(shown, 0)).forEach(ev => {
       const chip = document.createElement("div");
       chip.className = "chip " + (ev.isObligation ? "due" : ev.visibility);
       chip.textContent = (ev.time ? humanTime(ev.time) + " " : "") + ev.title;
-      chip.title = ev.title;
-      cell.appendChild(chip);
+      chips.appendChild(chip);
     });
-    if (items.length > MAX_CHIPS) {
+    cell.appendChild(chips);
+
+    if (items.length > shown) {
       const more = document.createElement("div");
       more.className = "more";
-      more.textContent = "+" + (items.length - MAX_CHIPS) + " more";
+      more.textContent = "+" + (items.length - shown) + " more";
       cell.appendChild(more);
     }
 
-    cell.addEventListener("click", () => {
-      picked = (picked === k) ? null : k;
-      if (picked) document.getElementById("evDate").value = picked;
-      render();
+    cell.setAttribute("aria-label", longDay(k) +
+      (items.length ? ", " + items.length + " item" + (items.length === 1 ? "" : "s") : ", nothing on"));
+    cell.addEventListener("click", () => showDay(k));
+    cell.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showDay(k); }
     });
     grid.appendChild(cell);
   }
 
-  // Obligations with no specific day still need saying somewhere, or
-  // they silently vanish from the one place people are now told to look.
   const vague = obligations.filter(i =>
     (i.cadence === "monthly" || (i.month || 0) - 1 === monthIndex) && !i.day);
   document.getElementById("monthNote").textContent = vague.length
@@ -665,40 +843,24 @@ function renderUpcoming() {
   });
 }
 
-function renderDay() {
-  const card = document.getElementById("dayCard");
-  if (!picked || view !== "month") { card.style.display = "none"; return; }
-  const due = obligationsIn(cursor.getFullYear(), cursor.getMonth());
-  const items = eventsOn(picked, due);
-  card.style.display = "block";
-  document.getElementById("dayTitle").textContent = humanDay(picked);
-  const list = document.getElementById("dayList");
-  list.innerHTML = "";
-  if (!items.length) {
-    list.innerHTML = '<div class="empty">Nothing on this day yet. Add one below — the date is already filled in.</div>';
-    return;
-  }
-  items.forEach(ev => list.appendChild(eventEl(ev)));
-}
-
 function eventEl(ev) {
   const el = document.createElement("div");
   el.className = "ev";
 
-  const parts = [];
-  if (ev.time) parts.push(humanTime(ev.time));
-  if (ev.location) parts.push(ev.location);
+  const bits = [];
+  if (ev.time) bits.push(esc(humanTime(ev.time)));
+  if (ev.location) bits.push(linkify(ev.location));
 
   let recipientLine = "";
   if (ev.visibility === "direct" && ev.author === me.email) {
-    recipientLine = " · for " + esc((ev.recipients || []).join(", "));
+    recipientLine = " · for " + linkify((ev.recipients || []).join(", "));
   }
 
   el.innerHTML =
     "<h3>" + esc(ev.title) + pillFor(ev) +
       (ev.date === todayKey() ? '<span class="pill today">Today</span>' : "") + "</h3>" +
-    (parts.length ? '<div class="when">' + esc(parts.join(" · ")) + "</div>" : "") +
-    (ev.notes ? '<div class="body">' + esc(ev.notes) + "</div>" : "") +
+    (bits.length ? '<div class="when">' + bits.join(" · ") + "</div>" : "") +
+    (ev.notes ? '<div class="body">' + linkify(ev.notes) + "</div>" : "") +
     (ev.isObligation
       ? '<div class="meta">Recurring reporting deadline — edit it in the Reporting Calendar.</div>'
       : '<div class="meta">Added by ' + esc(ev.authorName || ev.author) + recipientLine + "</div>");
@@ -715,6 +877,325 @@ function eventEl(ev) {
   return el;
 }
 
+// -------------------------------------------------------- day zoom --
+
+function showDay(k) {
+  openDay = k;
+  document.getElementById("dayOverlay").hidden = false;
+  renderSheet();
+  document.getElementById("sheetClose").focus();
+}
+
+function hideDay() {
+  openDay = null;
+  document.getElementById("dayOverlay").hidden = true;
+}
+
+function renderSheet() {
+  const items = allOn(openDay);
+  document.getElementById("sheetTitle").textContent = longDay(openDay);
+  const diff = daysBetween(todayKey(), openDay);
+  document.getElementById("sheetSub").textContent =
+    diff === 0 ? "Today" :
+    diff === 1 ? "Tomorrow" :
+    diff === -1 ? "Yesterday" :
+    diff > 0 ? "In " + diff + " days" : Math.abs(diff) + " days ago";
+
+  const list = document.getElementById("sheetList");
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">Nothing on this day.</div>';
+    return;
+  }
+  items.forEach(ev => list.appendChild(eventEl(ev)));
+}
+
+document.getElementById("sheetClose").addEventListener("click", hideDay);
+document.getElementById("dayOverlay").addEventListener("click", e => {
+  if (e.target.id === "dayOverlay") hideDay();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && openDay) hideDay();
+});
+document.getElementById("sheetAdd").addEventListener("click", () => {
+  document.getElementById("evDate").value = openDay;
+  hideDay();
+  document.getElementById("evTitle").focus();
+  document.getElementById("evTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// ----------------------------------------------------------- import --
+
+/* One row per date. The column order is fixed and published in the
+ * template, because guessing at arbitrary spreadsheet layouts is how
+ * an importer ends up silently putting the wrong thing in the wrong
+ * field. Everything is shown in a preview before anything is written. */
+const COLUMNS = ["date", "time", "title", "visibility", "recipients", "location", "notes", "remindDays"];
+
+function parseDelimited(text) {
+  // Full CSV rules: quoted fields may contain commas, newlines and
+  // doubled quotes. Tab-separated is detected too, since that is what
+  // you get from copying a block of spreadsheet cells.
+  const useTab = text.indexOf("\t") !== -1 && (text.indexOf(",") === -1 ||
+    text.split("\t").length > text.split(",").length);
+  const delim = useTab ? "\t" : ",";
+  const rows = [];
+  let row = [], field = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else quoted = false;
+      } else field += c;
+    } else if (c === '"') {
+      quoted = true;
+    } else if (c === delim) {
+      row.push(field); field = "";
+    } else if (c === "\n") {
+      row.push(field); field = "";
+      rows.push(row); row = [];
+    } else if (c !== "\r") {
+      field += c;
+    }
+  }
+  row.push(field);
+  if (row.length > 1 || row[0].trim()) rows.push(row);
+  return rows.filter(r => r.some(cell => String(cell).trim()));
+}
+
+function looksLikeHeader(row) {
+  const joined = row.join(" ").toLowerCase();
+  return joined.indexOf("date") !== -1 && joined.indexOf("title") !== -1;
+}
+
+function normaliseDate(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+  // Sheets exports US-style by default; accept both separators.
+  m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (m) {
+    let year = m[3];
+    if (year.length === 2) year = "20" + year;
+    return year + "-" + m[1].padStart(2, "0") + "-" + m[2].padStart(2, "0");
+  }
+  return "";
+}
+
+function normaliseTime(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const m = s.match(/^(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?$/i);
+  if (!m) return "";
+  let h = Number(m[1]);
+  const suffix = (m[3] || "").toLowerCase();
+  if (suffix.startsWith("p") && h < 12) h += 12;
+  if (suffix.startsWith("a") && h === 12) h = 0;
+  if (h > 23) return "";
+  return String(h).padStart(2, "0") + ":" + m[2];
+}
+
+function normaliseVisibility(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (!s) return "team";
+  if (s.startsWith("j") || s.indexOf("private") !== -1 || s.indexOf("me") === 0) return "private";
+  if (s.startsWith("s") || s.indexOf("direct") !== -1 || s.indexOf("specific") !== -1) return "direct";
+  return "team";
+}
+
+function rowToEvent(cells) {
+  const get = i => String(cells[i] == null ? "" : cells[i]).trim();
+  const ev = {
+    date: normaliseDate(get(0)),
+    time: normaliseTime(get(1)),
+    title: get(2),
+    visibility: normaliseVisibility(get(3)),
+    recipients: get(4).split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean),
+    location: get(5),
+    notes: get(6),
+    remindDays: parseInt(get(7), 10) || 0,
+  };
+  const problems = [];
+  if (!ev.date) problems.push("date not understood (use 2026-08-14 or 08/14/2026)");
+  if (!ev.title) problems.push("no title");
+  if (ev.visibility === "direct" && !ev.recipients.length) {
+    problems.push("“specific people” needs at least one email");
+  }
+  if (get(1) && !ev.time) problems.push("time not understood (use 14:30 or 2:30pm)");
+  return { ev: ev, problems: problems, raw: cells };
+}
+
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise((resolve, reject) => {
+    const tag = document.createElement("script");
+    tag.src = PDFJS_URL;
+    tag.onload = () => {
+      if (!window.pdfjsLib) { reject(new Error("PDF reader didn't load.")); return; }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      resolve(window.pdfjsLib);
+    };
+    tag.onerror = () => reject(new Error("Couldn't download the PDF reader — check the connection."));
+    document.head.appendChild(tag);
+  });
+}
+
+/* A PDF has no columns, only glyphs at coordinates. Text on roughly the
+ * same vertical position is one row; sorting that row by horizontal
+ * position recovers the cells. This is a reconstruction and it can be
+ * wrong, which is exactly why nothing is written until the preview has
+ * been looked at. CSV needs no guessing and is the better path. */
+function rowsFromPdf(file) {
+  return loadPdfJs()
+    .then(pdfjsLib => file.arrayBuffer().then(buf => pdfjsLib.getDocument({ data: buf }).promise))
+    .then(pdf => {
+      const pages = [];
+      for (let n = 1; n <= pdf.numPages; n++) pages.push(pdf.getPage(n).then(p => p.getTextContent()));
+      return Promise.all(pages);
+    })
+    .then(contents => {
+      const rows = [];
+      contents.forEach(content => {
+        const lines = {};
+        content.items.forEach(item => {
+          if (!String(item.str).trim()) return;
+          const y = Math.round(item.transform[5]);
+          const bucket = Object.keys(lines).find(k => Math.abs(Number(k) - y) <= 3);
+          const usedKey = bucket === undefined ? String(y) : bucket;
+          (lines[usedKey] = lines[usedKey] || []).push({ x: item.transform[4], text: item.str });
+        });
+        Object.keys(lines)
+          .sort((a, b) => Number(b) - Number(a))   // top of the page first
+          .forEach(k => {
+            rows.push(lines[k].sort((a, b) => a.x - b.x).map(i => i.text.trim()));
+          });
+      });
+      return rows;
+    });
+}
+
+function showPreview(rows) {
+  const target = document.getElementById("importPreview");
+  const goBtn = document.getElementById("importGoBtn");
+  pendingImport = [];
+  target.innerHTML = "";
+
+  if (rows.length && looksLikeHeader(rows[0])) rows = rows.slice(1);
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty">Nothing to import — no rows found.</div>';
+    goBtn.disabled = true;
+    return;
+  }
+
+  const parsed = rows.map(rowToEvent);
+  const good = parsed.filter(p => !p.problems.length);
+  pendingImport = good.map(p => p.ev);
+
+  const table = document.createElement("table");
+  table.className = "preview";
+  table.innerHTML =
+    "<thead><tr><th>Date</th><th>Time</th><th>Title</th><th>Who sees it</th><th></th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  parsed.forEach(p => {
+    const tr = document.createElement("tr");
+    if (p.problems.length) tr.className = "bad";
+    tr.innerHTML =
+      "<td>" + esc(p.ev.date || p.raw[0] || "") + "</td>" +
+      "<td>" + esc(p.ev.time ? humanTime(p.ev.time) : "") + "</td>" +
+      "<td>" + esc(p.ev.title) + "</td>" +
+      "<td>" + esc(p.problems.length ? "" :
+        p.ev.visibility === "team" ? "Whole team" :
+        p.ev.visibility === "private" ? "Just me" :
+        p.ev.recipients.join(", ")) + "</td>" +
+      '<td class="why">' + esc(p.problems.join("; ")) + "</td>";
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  target.appendChild(table);
+
+  const summary = document.createElement("div");
+  summary.className = "note";
+  const skipped = parsed.length - good.length;
+  summary.innerHTML = esc(good.length + " row" + (good.length === 1 ? "" : "s") + " ready to import") +
+    (skipped ? ' <span class="warn">' + esc(skipped + " will be skipped — fix the red rows and check again.") + "</span>" : "");
+  target.appendChild(summary);
+
+  goBtn.disabled = !good.length;
+  goBtn.textContent = good.length ? "Import " + good.length : "Import";
+}
+
+function readChosen() {
+  const msg = document.getElementById("importMsg");
+  const fileInput = document.getElementById("importFile");
+  const pasted = document.getElementById("importPaste").value.trim();
+  const file = fileInput.files && fileInput.files[0];
+
+  msg.className = "saved";
+  if (file && /\.pdf$/i.test(file.name)) {
+    msg.textContent = "Reading the PDF…";
+    return rowsFromPdf(file).then(rows => { msg.textContent = ""; return rows; });
+  }
+  if (file) {
+    msg.textContent = "Reading…";
+    return file.text().then(text => { msg.textContent = ""; return parseDelimited(text); });
+  }
+  if (pasted) return Promise.resolve(parseDelimited(pasted));
+  return Promise.reject(new Error("Choose a file or paste some rows first."));
+}
+
+document.getElementById("importToggle").addEventListener("click", () => {
+  const body = document.getElementById("importBody");
+  const open = body.style.display === "block";
+  body.style.display = open ? "none" : "block";
+  document.getElementById("importToggle").textContent = open ? "Open" : "Close";
+});
+
+document.getElementById("importPreviewBtn").addEventListener("click", () => {
+  const msg = document.getElementById("importMsg");
+  readChosen()
+    .then(showPreview)
+    .catch(err => { msg.className = "saved warn"; msg.textContent = err.message; });
+});
+
+document.getElementById("importGoBtn").addEventListener("click", () => {
+  if (!pendingImport.length) return;
+  const msg = document.getElementById("importMsg");
+  const goBtn = document.getElementById("importGoBtn");
+  const total = pendingImport.length;
+  if (!confirm("Add " + total + " date" + (total === 1 ? "" : "s") + " to the calendar?")) return;
+
+  goBtn.disabled = true;
+  msg.className = "saved";
+  msg.textContent = "Importing 0 of " + total + "…";
+
+  // One at a time rather than all at once: a burst of parallel writes
+  // on a phone connection is how you get half of them failing with no
+  // clear reason, and this way the count on screen is truthful.
+  let done = 0;
+  const failed = [];
+  pendingImport.reduce((chain, ev) => chain.then(() =>
+    saveEvent(ev)
+      .then(() => { done++; })
+      .catch(() => { failed.push(ev.title); })
+      .then(() => { msg.textContent = "Importing " + (done + failed.length) + " of " + total + "…"; })
+  ), Promise.resolve()).then(() => {
+    pendingImport = [];
+    document.getElementById("importPreview").innerHTML = "";
+    document.getElementById("importPaste").value = "";
+    document.getElementById("importFile").value = "";
+    goBtn.textContent = "Import";
+    if (failed.length) {
+      msg.className = "saved warn";
+      msg.textContent = "Added " + done + ", but " + failed.length + " failed: " + failed.join(", ");
+    } else {
+      msg.textContent = "Added " + done + ".";
+      setTimeout(() => { msg.textContent = ""; }, 4000);
+    }
+  });
+});
+
 // ----------------------------------------------------------- chrome --
 
 document.getElementById("prevBtn").addEventListener("click", () => {
@@ -727,10 +1208,9 @@ document.getElementById("nextBtn").addEventListener("click", () => {
 });
 document.getElementById("todayBtn").addEventListener("click", () => {
   cursor = new Date();
-  picked = todayKey();
-  document.getElementById("evDate").value = picked;
   view = "month";
   render();
+  showDay(todayKey());
 });
 Array.from(document.querySelectorAll("#viewTabs button")).forEach(b => {
   b.addEventListener("click", () => { view = b.getAttribute("data-view"); render(); });
