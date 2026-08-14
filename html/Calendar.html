@@ -75,8 +75,13 @@
   .grid .dowrow { grid-row: auto; }
   .headrow { display: contents; }
   .day { background: #fff; padding: 4px 5px 5px; cursor: pointer; overflow: hidden;
-         display: flex; flex-direction: column; min-width: 0; }
-  .day:hover { background: #f4f7fe; }
+         display: flex; flex-direction: column; min-width: 0;
+         transition: background .12s ease; }
+  /* A clear grey on hover, on the cell and on anything inside it, so
+     it's obvious the whole box is the target and not just the number. */
+  .day:hover, .day:hover * { background-color: #d9dce2; }
+  .day:hover .chip { background-color: #cfd3da; }
+  .day:active { background-color: #cbcfd6; }
   .day:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
   .day.other { background: #fbfbfc; }
   .day.other .daynum { color: #c3c8d2; }
@@ -123,7 +128,11 @@
   .sheethead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
   .sheethead .big { font-size: 19px; font-weight: 800; }
   .sheethead .small { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  .closebtn { background: transparent; color: var(--muted); font-size: 20px; padding: 2px 8px; line-height: 1; }
+  .closebtn { background: transparent; color: var(--muted); font-size: 20px;
+              padding: 4px 11px; line-height: 1; border-radius: 8px;
+              transition: background .12s ease, color .12s ease; }
+  .closebtn:hover { background: #d9dce2; color: var(--ink); }
+  .closebtn:active { background: #cbcfd6; }
 
   #peopleWrap { display: none; margin-top: 10px; }
   #peopleList { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 4px; }
@@ -798,7 +807,9 @@ function renderGrid() {
       (items.length ? ", " + items.length + " item" + (items.length === 1 ? "" : "s") : ", nothing on"));
     cell.addEventListener("click", () => showDay(k));
     cell.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showDay(k); }
+      // force: a keypress produces no phantom follow-up click, so the
+      // rate limit that exists for taps would only get in the way here.
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showDay(k, true); }
     });
     grid.appendChild(cell);
   }
@@ -879,14 +890,41 @@ function eventEl(ev) {
 
 // -------------------------------------------------------- day zoom --
 
-function showDay(k) {
+/* Opening and closing are rate-limited against each other, which is
+ * what makes the day panel actually usable.
+ *
+ * A tap on a touchscreen (and a tap on a trackpad) fires touchend and
+ * then, a moment later, a synthetic click at the same coordinates. By
+ * then the thing under those coordinates has changed: tap a day, the
+ * panel opens, and the follow-up click lands on the backdrop that is
+ * now beneath your finger and closes it again. Press the ✕ and the
+ * reverse happens -- the panel closes and the follow-up click lands on
+ * whatever day box is now underneath, opening that one.
+ *
+ * So it looked like clicks were being missed, when in fact each one was
+ * being handled twice. Ignoring a second toggle inside 350ms fixes both
+ * directions with one rule. Escape passes `force` because a keypress
+ * has no phantom second event. */
+let lastToggle = 0;
+
+function toggleAllowed(force) {
+  if (force) return true;
+  const now = Date.now();
+  if (now - lastToggle < 350) return false;
+  lastToggle = now;
+  return true;
+}
+
+function showDay(k, force) {
+  if (!toggleAllowed(force)) return;
   openDay = k;
   document.getElementById("dayOverlay").hidden = false;
   renderSheet();
   document.getElementById("sheetClose").focus();
 }
 
-function hideDay() {
+function hideDay(force) {
+  if (!toggleAllowed(force)) return;
   openDay = null;
   document.getElementById("dayOverlay").hidden = true;
 }
@@ -910,16 +948,30 @@ function renderSheet() {
   items.forEach(ev => list.appendChild(eventEl(ev)));
 }
 
-document.getElementById("sheetClose").addEventListener("click", hideDay);
-document.getElementById("dayOverlay").addEventListener("click", e => {
-  if (e.target.id === "dayOverlay") hideDay();
+document.getElementById("sheetClose").addEventListener("click", () => hideDay());
+
+/* Closing by clicking the backdrop only counts when the press *started*
+ * on the backdrop too. Otherwise selecting a line of text inside the
+ * panel and releasing the mouse a few pixels outside it would close the
+ * panel and throw away what you were reading. */
+let pressedBackdrop = false;
+const overlayEl = document.getElementById("dayOverlay");
+overlayEl.addEventListener("pointerdown", e => {
+  pressedBackdrop = e.target === overlayEl;
 });
+overlayEl.addEventListener("click", e => {
+  if (e.target === overlayEl && pressedBackdrop) hideDay();
+  pressedBackdrop = false;
+});
+
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && openDay) hideDay();
+  if (e.key === "Escape" && openDay) hideDay(true);
 });
+
 document.getElementById("sheetAdd").addEventListener("click", () => {
-  document.getElementById("evDate").value = openDay;
-  hideDay();
+  const day = openDay;
+  hideDay(true);
+  document.getElementById("evDate").value = day;
   document.getElementById("evTitle").focus();
   document.getElementById("evTitle").scrollIntoView({ behavior: "smooth", block: "center" });
 });
