@@ -59,6 +59,12 @@
   .tag.med { background: var(--amber-bg); color: var(--amber); }
   .tag.high, .tag.urgent { background: var(--red-bg); color: var(--red); }
   select.statusSelect { font-size: 12.5px; padding: 5px 8px; }
+
+  /* Where a status came from, under the description. Quiet by default;
+     the deleted-task case is the one that needs to be noticed. */
+  .tdnote { font-size: 11.5px; margin-top: 4px; color: var(--green); }
+  .tdnote.muted { color: var(--muted); }
+  .tdnote.warn { color: var(--red); font-weight: 700; }
   .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
 
   .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
@@ -306,6 +312,39 @@ function renderFilters() {
   });
 }
 
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function shortDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleDateString();
+}
+
+/* A one-line explanation of anything Todoist has told us about this
+ * request, so a status that changed by itself says why it changed
+ * rather than just appearing to have moved on its own.
+ * See scripts/sync_todoist_status.js for where these fields come from. */
+function todoistNote(item) {
+  if (item.todoistDeleted && item.status !== "Done") {
+    return '<div class="tdnote warn">Its Todoist task was deleted — this request is still open here.</div>';
+  }
+  if (item.todoistCompletedAt) {
+    const when = shortDate(item.todoistCompletedAt);
+    return '<div class="tdnote">Completed in Todoist' + (when ? " on " + esc(when) : "") + "</div>";
+  }
+  if (item.todoistClosedFromApp) {
+    return '<div class="tdnote">Closed here, and closed in Todoist too</div>';
+  }
+  if (item.todoistTaskId) {
+    return '<div class="tdnote muted">Sent to Todoist</div>';
+  }
+  return "";
+}
+
 function render() {
   renderStats();
   renderFilters();
@@ -318,20 +357,24 @@ function render() {
 
   visible.forEach(item => {
     const tr = document.createElement("tr");
+    // Everything from the database is escaped on the way in. These are
+    // colleagues rather than the public, but a description is free text
+    // typed on a phone and this table is rendered for everyone signed
+    // in -- unescaped, one pasted tag would run for all of them.
     tr.innerHTML = `
-      <td>${item.dateReported || ""}</td>
-      <td>${item.location}</td>
-      <td class="desc">${item.description}</td>
-      <td><span class="tag ${tagClass(item.priority)}">${item.priority}</span></td>
-      <td>${item.reporter || "—"}</td>
+      <td>${esc(item.dateReported)}</td>
+      <td>${esc(item.location)}</td>
+      <td class="desc">${esc(item.description)}${todoistNote(item)}</td>
+      <td><span class="tag ${tagClass(item.priority)}">${esc(item.priority)}</span></td>
+      <td>${esc(item.reporter) || "—"}</td>
       <td>
-        <select class="statusSelect" data-id="${item.id}">
+        <select class="statusSelect" data-id="${esc(item.id)}">
           <option ${item.status === "Open" ? "selected" : ""}>Open</option>
           <option ${item.status === "In Progress" ? "selected" : ""}>In Progress</option>
           <option ${item.status === "Done" ? "selected" : ""}>Done</option>
         </select>
       </td>
-      <td><button class="danger" data-remove="${item.id}" type="button">Delete</button></td>
+      <td><button class="danger" data-remove="${esc(item.id)}" type="button">Delete</button></td>
     `;
     tbody.appendChild(tr);
   });
