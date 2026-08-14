@@ -203,10 +203,11 @@ def main() -> int:
 
     # Stamp the service worker with a fresh build id so every deploy
     # gets its own cache name (see web/sw.js's comment).
+    build_id = str(int(time.time()))
     sw_path = OUT_DIR / "sw.js"
     if sw_path.exists():
         sw_text = sw_path.read_text(encoding="utf-8")
-        sw_text = sw_text.replace("__BUILD_ID__", str(int(time.time())))
+        sw_text = sw_text.replace("__BUILD_ID__", build_id)
         sw_path.write_text(sw_text, encoding="utf-8")
 
     # Mirror the actual guide content so the front end can fetch it
@@ -239,6 +240,18 @@ def main() -> int:
         skills_out.mkdir(parents=True, exist_ok=True)
         for path in skills_src.glob("*.skill"):
             shutil.copy2(path, skills_out / path.name)
+
+    # Stamp the build id into index.html so the running site can show
+    # which version it is.
+    index_path = OUT_DIR / "index.html"
+    if index_path.exists():
+        text = index_path.read_text(encoding="utf-8")
+        text = text.replace(
+            "</head>",
+            '<script>window.CENTER_BUILD_ID = "%s";</script>\n</head>' % build_id,
+            1,
+        )
+        index_path.write_text(text, encoding="utf-8")
 
     # The Skills list is defined once, in launcher.py, and read from
     # there rather than duplicated here. Keeping a second copy in the

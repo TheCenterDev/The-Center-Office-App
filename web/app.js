@@ -69,6 +69,12 @@
     els.settingsNavBtn.addEventListener("click", function () { toggleSidebar(false); showSettings(); });
     els.teamNavBtn.addEventListener("click", function () { toggleSidebar(false); showTeam(); });
 
+    // Stamped by the build (see scripts/build_site.py). Displayed so
+    // "am I actually on the new version?" is a glance rather than an
+    // investigation -- working that out cost hours once.
+    var buildEl = document.getElementById("footer-build");
+    if (buildEl) buildEl.textContent = "Build " + (window.CENTER_BUILD_ID || "dev");
+
     if ("serviceWorker" in navigator) {
       // updateViaCache "none" makes the browser re-fetch sw.js itself
       // rather than potentially serving it from its own HTTP cache, so
