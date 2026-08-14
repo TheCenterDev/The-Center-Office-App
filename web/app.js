@@ -54,7 +54,6 @@
     els.teamView = document.getElementById("team-view");
     els.topbarTitle = document.getElementById("topbar-title");
     els.footerUserName = document.getElementById("footer-user-name");
-    els.skillsNavBtn = document.getElementById("skills-nav-btn");
     els.settingsNavBtn = document.getElementById("settings-nav-btn");
     els.teamNavBtn = document.getElementById("team-nav-btn");
 
@@ -65,7 +64,6 @@
 
     els.loginForm.addEventListener("submit", handleLoginSubmit);
     els.loginForgot.addEventListener("click", handleForgotPassword);
-    els.skillsNavBtn.addEventListener("click", function () { toggleSidebar(false); showSkills(); });
     els.settingsNavBtn.addEventListener("click", function () { toggleSidebar(false); showSettings(); });
     els.teamNavBtn.addEventListener("click", function () { toggleSidebar(false); showTeam(); });
 
@@ -242,7 +240,28 @@
       els.navList.appendChild(btn);
     });
 
-    if (q && docs.length === 0) {
+    // Skills is a page of its own, listed with the guides and tools
+    // rather than sitting in the footer next to Settings and Team. The
+    // footer reads as "utility buttons", so a page with actual content
+    // in it was effectively invisible there -- it belongs in the list
+    // you scan, in the same position the desktop launcher puts it.
+    var showSkillsItem = !q || "skills".indexOf(q) === 0 || q.indexOf("skill") !== -1;
+    if (showSkillsItem) {
+      var skillsBtn = document.createElement("button");
+      skillsBtn.type = "button";
+      skillsBtn.className = "nav-item" + (state.view === "skills" ? " active" : "");
+      skillsBtn.setAttribute("role", "listitem");
+      var skillsLabel = document.createElement("span");
+      skillsLabel.textContent = "Skills";
+      skillsBtn.appendChild(skillsLabel);
+      skillsBtn.addEventListener("click", function () {
+        toggleSidebar(false);
+        showSkills();
+      });
+      els.navList.appendChild(skillsBtn);
+    }
+
+    if (q && docs.length === 0 && !showSkillsItem) {
       var none = document.createElement("div");
       none.className = "badge";
       none.style.padding = "10px 12px";
