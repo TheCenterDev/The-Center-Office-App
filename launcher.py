@@ -355,7 +355,7 @@ except Exception:
     pass
 
 try:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
     _pil_import_error = None
 except ImportError as _e:
     # Pillow is a real dependency (logo + drawn search/team icons), not an
@@ -365,6 +365,7 @@ except ImportError as _e:
     # makes that state visible in error_log.txt instead of silent.
     Image = None
     ImageDraw = None
+    ImageFont = None
     _pil_import_error = str(_e)
 
 try:
@@ -1563,6 +1564,154 @@ def build_team_icon(size=16, color="#ffffff"):
     right_cx = round(big * 0.66)
     draw.ellipse((right_cx - r, cy - r, right_cx + r, cy + r), fill=color)
     draw.ellipse((left_cx - r, cy - r, left_cx + r, cy + r), fill=color)
+    img = img.resize((size, size), Image.LANCZOS)
+    return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
+
+
+def build_app_icon(title, size=36):
+    """An icon for one interactive tool, drawn to echo the logo: the
+    Center's broken ring in cyan and navy, with a simple glyph inside
+    saying what the tool is.
+
+    The Apps page used to show a navy square with the tool's first
+    letter, which meant every tool looked identical apart from one
+    character -- "Count Log" and "Credit Card Reconciliation" were both
+    a "C". These are drawn rather than shipped as image files so they
+    stay sharp at any text size and there's nothing to keep in sync;
+    same approach as build_search_icon and build_team_icon above.
+
+    Falls back to the first letter if Pillow isn't available, so the
+    page still renders something sensible."""
+    if Image is None or ImageDraw is None:
+        log_pil_missing_once()
+        return None
+
+    scale = 4
+    big = size * scale
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    cyan = ACCENT          # #00C0F3, sampled from the logo
+    navy = "#1D2071"       # the logo's navy, fixed rather than themed
+
+    # --- the ring: two arcs with gaps, as in the logo's mark ---
+    ring_w = max(2, round(big * 0.075))
+    inset = round(ring_w * 0.6)
+    box = (inset, inset, big - inset, big - inset)
+    draw.arc(box, start=118, end=332, fill=cyan, width=ring_w)
+    draw.arc(box, start=342, end=104, fill=navy, width=ring_w)
+
+    # --- the glyph, sized to sit inside the ring ---
+    c = big / 2.0
+    r = big * 0.30                     # usable radius inside the ring
+    lw = max(2, round(big * 0.055))    # glyph stroke width
+    name = (title or "").lower()
+
+    def mentions(*words):
+        """Whole-word match. Plain substring matching bit here: "Whitley
+        County Resource Directory" contains "count", so the directory
+        was drawn with the Count Log's tally marks."""
+        return any(re.search(r"\b" + w, name) for w in words)
+
+    def rrect(x0, y0, x1, y1, radius, fill=None, outline=None, width=1):
+        draw.rounded_rectangle([x0, y0, x1, y1], radius=radius,
+                               fill=fill, outline=outline, width=width)
+
+    if mentions("maintenance", "repair", "facilit"):
+        # Wrench: a thick diagonal shaft with an open head.
+        # A gear. A wrench is the more obvious symbol for maintenance,
+        # but at 36 pixels its handle-and-jaw silhouette read as a key
+        # or a map pin; a gear stays unmistakable when small.
+        import math
+        outer, inner = r * 0.86, r * 0.60
+        teeth = 8
+        pts = []
+        for i in range(teeth * 2):
+            ang = math.pi * i / teeth - math.pi / 2
+            rad = outer if i % 2 == 0 else inner
+            pts.append((c + rad * math.cos(ang), c + rad * math.sin(ang)))
+        draw.polygon(pts, fill=navy)
+        hole = r * 0.30
+        draw.ellipse([c - hole, c - hole, c + hole, c + hole], fill=(0, 0, 0, 0))
+        draw.ellipse([c - hole, c - hole, c + hole, c + hole], fill=cyan)
+
+    elif mentions("onboard", "hire"):
+        # Clipboard with a tick.
+        rrect(c - r * 0.62, c - r * 0.78, c + r * 0.62, c + r * 0.82,
+              radius=lw, outline=navy, width=lw)
+        rrect(c - r * 0.26, c - r * 0.98, c + r * 0.26, c - r * 0.66,
+              radius=lw * 0.6, fill=navy)
+        draw.line([(c - r * 0.32, c + r * 0.12), (c - r * 0.06, c + r * 0.38),
+                   (c + r * 0.38, c - r * 0.30)], fill=cyan, width=lw, joint="curve")
+    elif mentions("resource", "directory", "guide"):
+        # An open book.
+        draw.line([(c, c - r * 0.52), (c, c + r * 0.62)], fill=navy, width=lw)
+        for side in (-1, 1):
+            draw.line([(c + side * r * 0.06, c - r * 0.52),
+                       (c + side * r * 0.78, c - r * 0.34)], fill=navy, width=lw)
+            draw.line([(c + side * r * 0.78, c - r * 0.34),
+                       (c + side * r * 0.78, c + r * 0.52)], fill=cyan, width=lw)
+            draw.line([(c + side * r * 0.78, c + r * 0.52),
+                       (c + side * r * 0.06, c + r * 0.62)], fill=navy, width=lw)
+    elif mentions("count", "tally"):
+        # Four tally strokes and the diagonal across them.
+        for i in range(4):
+            x = c - r * 0.62 + i * (r * 0.38)
+            draw.line([(x, c - r * 0.55), (x, c + r * 0.55)], fill=navy, width=lw)
+        draw.line([(c - r * 0.80, c + r * 0.62), (c + r * 0.78, c - r * 0.62)],
+                  fill=cyan, width=lw)
+    elif mentions("note"):
+        # A page with lines.
+        rrect(c - r * 0.66, c - r * 0.80, c + r * 0.66, c + r * 0.80,
+              radius=lw, outline=navy, width=lw)
+        for i, w in enumerate((0.78, 0.78, 0.44)):
+            y = c - r * 0.34 + i * (r * 0.40)
+            draw.line([(c - r * 0.36, y), (c - r * 0.36 + r * w * 0.92, y)],
+                      fill=cyan, width=max(2, lw - scale))
+    elif mentions("timer", "clock", "stopwatch"):
+        # Clock face with hands.
+        draw.ellipse([c - r * 0.78, c - r * 0.70, c + r * 0.78, c + r * 0.86],
+                     outline=navy, width=lw)
+        draw.line([(c, c + r * 0.08), (c, c - r * 0.34)], fill=navy, width=lw)
+        draw.line([(c, c + r * 0.08), (c + r * 0.40, c + r * 0.30)], fill=cyan, width=lw)
+        draw.line([(c - r * 0.22, c - r * 0.92), (c + r * 0.22, c - r * 0.92)],
+                  fill=navy, width=lw)  # the winder on top
+    elif mentions("calendar", "reporting", "schedule", "deadline"):
+        # Calendar: header bar and a grid of days.
+        rrect(c - r * 0.76, c - r * 0.62, c + r * 0.76, c + r * 0.80,
+              radius=lw, outline=navy, width=lw)
+        draw.line([(c - r * 0.76, c - r * 0.24), (c + r * 0.76, c - r * 0.24)],
+                  fill=navy, width=lw)
+        for dx in (-0.34, 0.34):
+            draw.line([(c + r * dx, c - r * 0.88), (c + r * dx, c - r * 0.50)],
+                      fill=navy, width=lw)
+        dot = max(2, round(lw * 0.85))
+        for row in range(2):
+            for col in range(3):
+                x = c - r * 0.42 + col * (r * 0.42)
+                y = c + r * 0.06 + row * (r * 0.36)
+                draw.ellipse([x - dot, y - dot, x + dot, y + dot], fill=cyan)
+    elif mentions("credit", "card", "reconcil", "expense"):
+        # Payment card with a magnetic stripe.
+        rrect(c - r * 0.86, c - r * 0.56, c + r * 0.86, c + r * 0.58,
+              radius=lw * 1.2, outline=navy, width=lw)
+        draw.line([(c - r * 0.86, c - r * 0.18), (c + r * 0.86, c - r * 0.18)],
+                  fill=cyan, width=lw)
+        draw.line([(c - r * 0.54, c + r * 0.28), (c - r * 0.04, c + r * 0.28)],
+                  fill=navy, width=max(2, lw - scale))
+    else:
+        # Anything we don't recognise keeps the initial, but inside the
+        # ring so it still looks like part of the set.
+        letter = (title[:1] or "?").upper()
+        try:
+            font = ImageFont.truetype("Helvetica", int(big * 0.40))
+        except Exception:
+            font = ImageFont.load_default()
+        box_ = draw.textbbox((0, 0), letter, font=font)
+        draw.text((c - (box_[2] - box_[0]) / 2 - box_[0],
+                   c - (box_[3] - box_[1]) / 2 - box_[1]),
+                  letter, font=font, fill=navy)
+
     img = img.resize((size, size), Image.LANCZOS)
     return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
 
@@ -3059,16 +3208,26 @@ class LauncherApp:
             row = ctk.CTkFrame(card, fg_color=CARD_BG)
             row.pack(fill="x", padx=18, pady=16)
 
-            ctk.CTkLabel(
-                row,
-                text=(title[:1] or "?").upper(),
-                width=36,
-                height=36,
-                corner_radius=10,
-                fg_color=TEXT_DARK,
-                text_color="white",
-                font=F(15, "bold"),
-            ).pack(side="left")
+            # Icon drawn to match the logo (see build_app_icon). Kept on
+            # the card so it isn't garbage-collected -- CTkImage doesn't
+            # hold its own reference and the image vanishes if the only
+            # one goes out of scope when this loop moves on.
+            icon = build_app_icon(title, 36)
+            if icon is not None:
+                card._app_icon = icon
+                ctk.CTkLabel(row, image=icon, text="", width=36, height=36,
+                             fg_color=CARD_BG).pack(side="left")
+            else:
+                ctk.CTkLabel(
+                    row,
+                    text=(title[:1] or "?").upper(),
+                    width=36,
+                    height=36,
+                    corner_radius=10,
+                    fg_color=TEXT_DARK,
+                    text_color="white",
+                    font=F(15, "bold"),
+                ).pack(side="left")
 
             text_holder = ctk.CTkFrame(row, fg_color=CARD_BG)
             text_holder.pack(side="left", padx=(14, 0), fill="x", expand=True)
