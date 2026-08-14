@@ -206,6 +206,17 @@ def main() -> int:
         if path.is_file():
             shutil.copy2(path, out_html_dir / path.name)
 
+    # Downloadable .skill bundles. The Guides page links to these with a
+    # relative ../assets/skills/ path, which resolves inside the desktop
+    # app but 404'd on the mobile site, because assets/ was never copied
+    # into the build. Same path shape either way now.
+    skills_src = REPO_ROOT / "assets" / "skills"
+    if skills_src.is_dir():
+        skills_out = OUT_DIR / "assets" / "skills"
+        skills_out.mkdir(parents=True, exist_ok=True)
+        for path in skills_src.glob("*.skill"):
+            shutil.copy2(path, skills_out / path.name)
+
     index = build_guides_index()
     (OUT_DIR / "guides-index.json").write_text(json.dumps(index, indent=2), encoding="utf-8")
 
