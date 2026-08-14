@@ -44,6 +44,16 @@ echo "Installing the new version..."
 rm -rf "$DEST_DIR/$APP_NAME"
 cp -R "$NEW_APP" "$DEST_DIR/"
 
+# Reopen it. The app copies new guides, tools, and skill files into the
+# data folder as it starts, so leaving it closed makes a fresh update
+# look like it didn't arrive -- the files are in the app, but nothing
+# has run to put them where the app reads from yet. That gap caused
+# real "it's not there" confusion, so the updater now closes the loop
+# itself.
+echo "Reopening the app..."
+open "$DEST_DIR/$APP_NAME" 2>/dev/null || \
+  echo "  (couldn't reopen automatically -- just open it yourself)"
+
 echo ""
 echo "Done. $APP_NAME has been updated in $DEST_DIR."
 echo "If macOS still shows an 'Apple could not verify' warning the first"
