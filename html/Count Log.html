@@ -37,8 +37,20 @@
   /* Big enough to hit reliably while holding a clipboard and counting
      children onto a van. */
   .counter { text-align: center; padding: 6px 0 2px; }
+  /* An editable number, but it has to still read as the big display --
+     no spinner arrows, no box, just the number. Typing 47 straight in
+     is faster than tapping 47 times when someone already knows it. */
   .bignum { font-variant-numeric: tabular-nums; font-weight: 800;
-            font-size: clamp(72px, 26vw, 150px); line-height: 1; letter-spacing: -.02em; }
+            font-size: clamp(72px, 26vw, 150px); line-height: 1; letter-spacing: -.02em;
+            width: 100%; text-align: center; border: none; outline: none;
+            background: transparent; color: var(--ink); padding: 0;
+            font-family: inherit; -moz-appearance: textfield; }
+  .bignum::-webkit-outer-spin-button, .bignum::-webkit-inner-spin-button {
+    -webkit-appearance: none; margin: 0; }
+  .bignum:focus { color: var(--blue); }
+
+  .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+  .field label { font-size: 12px; font-weight: 700; color: var(--muted); }
   .countlabel { font-size: 15px; color: var(--muted); font-weight: 700; min-height: 22px; }
   .tapbtns { display: flex; gap: 12px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
   .tap { width: 132px; height: 84px; font-size: 34px; border-radius: 16px; }
@@ -71,7 +83,7 @@
 <body>
 <div class="wrap">
   <h1>Count Log</h1>
-  <p class="sub">Tap to count, then save it. The saved numbers add themselves up for reporting.</p>
+  <p class="sub">Tap or type a count, say what and where in your own words, add a note if it helps. The saved numbers add themselves up for reporting.</p>
 
   <div id="authGate">
     <div class="card">
@@ -96,14 +108,25 @@
 
     <div class="card">
       <div class="row">
-        <label>Counting</label>
-        <select id="category"></select>
-        <label>at</label>
-        <select id="site"></select>
+        <div class="field">
+          <label for="category">What are you counting?</label>
+          <input type="text" id="category" list="categoryList" placeholder="e.g. Snacks provided" autocomplete="off">
+          <datalist id="categoryList"></datalist>
+        </div>
+        <div class="field">
+          <label for="site">Where?</label>
+          <input type="text" id="site" list="siteList" placeholder="e.g. Columbia City" autocomplete="off">
+          <datalist id="siteList"></datalist>
+        </div>
+        <div class="field" style="flex:0 0 150px;">
+          <label for="entryDate">Date</label>
+          <input type="date" id="entryDate">
+        </div>
       </div>
 
       <div class="counter">
-        <div class="bignum" id="bignum">0</div>
+        <input type="number" id="bignum" class="bignum" value="0" min="0" step="1"
+               inputmode="numeric" aria-label="Count">
         <div class="countlabel" id="countlabel"></div>
       </div>
 
@@ -112,9 +135,15 @@
         <button class="tap tapadd" id="plusBtn" type="button">+</button>
       </div>
 
+      <div class="field" style="margin-top:16px;">
+        <label for="noteInput">Note (optional)</label>
+        <input type="text" id="noteInput" placeholder="Anything worth remembering about this count"
+               style="width:100%;">
+      </div>
+
       <div class="row" style="margin-top:16px; justify-content:center;">
         <button class="primary" id="saveBtn" type="button">Save count</button>
-        <button class="ghost" id="zeroBtn" type="button">Reset to 0</button>
+        <button class="ghost" id="zeroBtn" type="button">Clear</button>
       </div>
       <div class="row" style="margin-top:8px; justify-content:center;">
         <span class="saved" id="savedMsg"></span>
@@ -172,9 +201,12 @@ firebase.initializeApp({
 });
 const auth = firebase.auth();
 
-// Categories chosen to match what actually gets reported. "Snacks" and
-// "Meals" go to Parkview; "Building usage" is a Core metric; the rest
-// are everyday operational counts staff already do by hand.
+// Starting suggestions only -- both fields accept anything typed. These
+// match what actually gets reported ("Snacks" and "Meals" go to
+// Parkview, "Building usage" is a Core metric), but nobody should have
+// to ask for a new category to count something. Whatever has been used
+// before is added to the suggestions automatically, so the list grows
+// into whatever this organisation actually counts.
 const CATEGORIES = [
   "Headcount",
   "Snacks provided",
@@ -214,14 +246,8 @@ function startApp(profile) {
   document.getElementById("authGate").style.display = "none";
   document.getElementById("appArea").style.display = "block";
 
-  CATEGORIES.forEach(c => {
-    const o = document.createElement("option"); o.value = c; o.textContent = c;
-    document.getElementById("category").appendChild(o);
-  });
-  SITES.forEach(s => {
-    const o = document.createElement("option"); o.value = s; o.textContent = s;
-    document.getElementById("site").appendChild(o);
-  });
+  document.getElementById("entryDate").value = todayISO();
+  refreshSuggestions();
   setThisMonth();
   renderCounter();
   watch();
@@ -261,24 +287,61 @@ document.getElementById("authForm").addEventListener("submit", e => {
 });
 document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
 
+/* Suggestions = the built-in list plus everything anyone has actually
+   used. Typed values are matched case-insensitively when merging, so
+   "whitko" and "Whitko" don't become two separate rows in the totals. */
+function refreshSuggestions() {
+  fillDatalist("categoryList", CATEGORIES, entries.map(e => e.category));
+  fillDatalist("siteList", SITES, entries.map(e => e.site));
+}
+
+function fillDatalist(id, base, used) {
+  const seen = {};
+  const values = [];
+  base.concat(used).forEach(v => {
+    const value = String(v || "").trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+    values.push(value);
+  });
+  values.sort((a, b) => a.localeCompare(b));
+  const list = document.getElementById(id);
+  list.innerHTML = "";
+  values.forEach(v => {
+    const o = document.createElement("option");
+    o.value = v;
+    list.appendChild(o);
+  });
+}
+
 // --------------------------------------------------------- counting --
 
 function renderCounter() {
-  document.getElementById("bignum").textContent = count;
-  const cat = document.getElementById("category").value;
-  const site = document.getElementById("site").value;
-  document.getElementById("countlabel").textContent = cat + " · " + site;
-  document.getElementById("saveBtn").disabled = count === 0;
+  const box = document.getElementById("bignum");
+  // Don't fight the person typing -- only write the value back when
+  // they're not in the middle of editing it.
+  if (document.activeElement !== box) box.value = String(count);
 
-  // What's already been logged today for this exact combination, so
-  // nobody double-counts a service that a colleague already saved.
-  const today = todayISO();
+  const cat = document.getElementById("category").value.trim();
+  const site = document.getElementById("site").value.trim();
+  const date = document.getElementById("entryDate").value || todayISO();
+
+  document.getElementById("countlabel").textContent =
+    cat ? (cat + (site ? " · " + site : "")) : "Type what you're counting";
+  document.getElementById("saveBtn").disabled = count === 0 || !cat;
+
+  // What's already been logged for this same thing, so nobody
+  // double-counts a service a colleague already saved. Compared
+  // case-insensitively, since these are typed by hand.
+  const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
   const already = entries
-    .filter(e => e.date === today && e.category === cat && e.site === site)
+    .filter(e => e.date === date && same(e.category, cat) && same(e.site, site))
     .reduce((sum, e) => sum + (e.count || 0), 0);
   document.getElementById("runningNote").textContent = already
-    ? "Already logged today for " + cat + " at " + site + ": " + already +
-      ". Saving adds to that rather than replacing it."
+    ? "Already logged for " + cat + (site ? " at " + site : "") + " on " + date +
+      ": " + already + ". Saving adds to that rather than replacing it."
     : "";
 }
 
@@ -287,9 +350,21 @@ document.getElementById("minusBtn").addEventListener("click", () => {
   if (count > 0) count--;
   renderCounter();
 });
-document.getElementById("zeroBtn").addEventListener("click", () => { count = 0; renderCounter(); });
-document.getElementById("category").addEventListener("change", renderCounter);
-document.getElementById("site").addEventListener("change", renderCounter);
+document.getElementById("zeroBtn").addEventListener("click", () => {
+  count = 0;
+  document.getElementById("noteInput").value = "";
+  renderCounter();
+});
+["category", "site", "entryDate"].forEach(id => {
+  document.getElementById(id).addEventListener("input", renderCounter);
+  document.getElementById(id).addEventListener("change", renderCounter);
+});
+document.getElementById("bignum").addEventListener("input", e => {
+  const typed = parseInt(e.target.value, 10);
+  count = isNaN(typed) || typed < 0 ? 0 : typed;
+  renderCounter();
+});
+document.getElementById("bignum").addEventListener("blur", renderCounter);
 
 // Space bar and the up arrow bump the count -- easier than aiming at a
 // screen while actually watching children.
@@ -306,10 +381,11 @@ document.getElementById("saveBtn").addEventListener("click", () => {
   const msg = document.getElementById("savedMsg");
   const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const payload = {
-    category: document.getElementById("category").value,
-    site: document.getElementById("site").value,
-    date: todayISO(),
+    category: document.getElementById("category").value.trim(),
+    site: document.getElementById("site").value.trim(),
+    date: document.getElementById("entryDate").value || todayISO(),
     count: count,
+    note: document.getElementById("noteInput").value.trim(),
     by: me.email,
     byName: me.name,
     at: new Date().toISOString(),
@@ -318,6 +394,7 @@ document.getElementById("saveBtn").addEventListener("click", () => {
   CenterSession.setDoc("count_log", id, payload).then(() => {
     msg.textContent = "Saved " + payload.count + " · " + payload.category;
     count = 0;
+    document.getElementById("noteInput").value = "";
     renderCounter();
     setTimeout(() => { msg.textContent = ""; }, 3500);
   }).catch(err => { msg.textContent = "Couldn't save: " + err.message; });
@@ -328,6 +405,7 @@ document.getElementById("saveBtn").addEventListener("click", () => {
 function watch() {
   stop = CenterSession.watchCollection("count_log", rows => {
     entries = rows.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+    refreshSuggestions();
     renderCounter();
     renderTotals();
     renderRecent();
@@ -374,23 +452,30 @@ function renderTotals() {
   }
 
   // category -> site -> total
+  // Grouped case-insensitively -- these are typed by hand, and
+  // "whitko" and "Whitko" are the same place. The first spelling seen
+  // is what gets displayed.
   const bySite = {};
-  const siteSet = {};
+  const catNames = {};
+  const siteNames = {};
+  const norm = v => String(v || "").trim().toLowerCase() || "(unspecified)";
   rows.forEach(e => {
-    bySite[e.category] = bySite[e.category] || {};
-    bySite[e.category][e.site] = (bySite[e.category][e.site] || 0) + (e.count || 0);
-    siteSet[e.site] = true;
+    const ck = norm(e.category), sk = norm(e.site);
+    if (!catNames[ck]) catNames[ck] = String(e.category || "").trim() || "(unspecified)";
+    if (!siteNames[sk]) siteNames[sk] = String(e.site || "").trim() || "(unspecified)";
+    bySite[ck] = bySite[ck] || {};
+    bySite[ck][sk] = (bySite[ck][sk] || 0) + (e.count || 0);
   });
-  const sites = Object.keys(siteSet).sort();
+  const sites = Object.keys(siteNames).sort((a, b) => siteNames[a].localeCompare(siteNames[b]));
 
   let html = "<table><thead><tr><th>Category</th>";
-  sites.forEach(s => { html += '<th class="num">' + esc(s) + "</th>"; });
+  sites.forEach(s => { html += '<th class="num">' + esc(siteNames[s]) + "</th>"; });
   html += '<th class="num">Total</th></tr></thead><tbody>';
 
   let grand = 0;
-  Object.keys(bySite).sort().forEach(cat => {
+  Object.keys(bySite).sort((a, b) => catNames[a].localeCompare(catNames[b])).forEach(cat => {
     let rowTotal = 0;
-    html += "<tr><td>" + esc(cat) + "</td>";
+    html += "<tr><td>" + esc(catNames[cat]) + "</td>";
     sites.forEach(s => {
       const v = bySite[cat][s] || 0;
       rowTotal += v;
@@ -412,10 +497,11 @@ function renderTotals() {
 document.getElementById("csvBtn").addEventListener("click", () => {
   const rows = entries.filter(inRange);
   if (!rows.length) return;
-  const lines = ["Date,Category,Site,Count,Counted by"];
+  const lines = ["Date,Category,Site,Count,Counted by,Note"];
   rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach(e => {
     const cell = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
-    lines.push([cell(e.date), cell(e.category), cell(e.site), e.count || 0, cell(e.byName || e.by)].join(","));
+    lines.push([cell(e.date), cell(e.category), cell(e.site), e.count || 0,
+                cell(e.byName || e.by), cell(e.note)].join(","));
   });
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
@@ -436,13 +522,14 @@ function renderRecent() {
   wrap.innerHTML = "";
   const table = document.createElement("table");
   table.innerHTML = "<thead><tr><th>Date</th><th>What</th><th>Where</th>" +
-                    '<th class="num">Count</th><th>By</th><th></th></tr></thead>';
+                    '<th class="num">Count</th><th>By</th><th>Note</th><th></th></tr></thead>';
   const tbody = document.createElement("tbody");
   rows.forEach(e => {
     const tr = document.createElement("tr");
     tr.innerHTML = "<td>" + esc(e.date) + "</td><td>" + esc(e.category) + "</td>" +
-                   "<td>" + esc(e.site) + "</td>" + '<td class="num">' + (e.count || 0) + "</td>" +
-                   "<td>" + esc(e.byName || e.by) + "</td>";
+                   "<td>" + esc(e.site || "—") + "</td>" + '<td class="num">' + (e.count || 0) + "</td>" +
+                   "<td>" + esc(e.byName || e.by) + "</td>" +
+                   '<td style="color:var(--muted);font-size:13px;">' + esc(e.note || "") + "</td>";
     const td = document.createElement("td");
     if (e.by === me.email) {
       const del = document.createElement("button");
