@@ -68,6 +68,19 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && hasProfile();
     }
 
+    // Tap-counter entries (headcount, snacks, meals, volunteers, van
+    // riders). One document per saved count, never edited in place, so
+    // two people counting the same service add up instead of
+    // overwriting each other. Everyone with a profile can add and read;
+    // an entry may only be removed by whoever recorded it, so a
+    // miscount can be fixed without anyone being able to quietly delete
+    // someone else's numbers before they're reported.
+    match /count_log/{entryId} {
+      allow read, create: if isSignedIn() && hasProfile();
+      allow update: if isSignedIn() && resource.data.by == emailKey();
+      allow delete: if isSignedIn() && resource.data.by == emailKey();
+    }
+
     // Notes. Three kinds, distinguished by the visibility field:
     //   "private" -- only the author, including not Admin/Director
     //   "team"    -- anyone signed in with a profile

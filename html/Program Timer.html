@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Program Timer</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; }
+
+  /* The clock is the whole point -- it has to be readable from across a
+     room, on a phone propped against a bookshelf. */
+  .clock {
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+    font-size: clamp(64px, 22vw, 148px);
+    line-height: 1;
+    text-align: center;
+    letter-spacing: -0.02em;
+    margin: 6px 0 2px;
+  }
+  .label { text-align: center; font-size: 17px; font-weight: 700; color: var(--muted); min-height: 24px; }
+  .upnext { text-align: center; font-size: 13px; color: var(--muted); margin-top: 6px; min-height: 18px; }
+
+  .clockcard.running { border-color: var(--blue); }
+  .clockcard.done { background: var(--green-bg); border-color: var(--green); }
+  .clockcard.done .clock, .clockcard.done .label { color: var(--green); }
+  .clockcard.warn .clock { color: var(--amber); }
+
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+  button { font: inherit; border: none; border-radius: 10px; padding: 12px 22px; cursor: pointer; font-weight: 700; font-size: 15px; }
+  .primary { background: var(--blue); color: #fff; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; }
+  .presets button { padding: 9px 15px; font-size: 14px; }
+
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text], input[type=number] {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line);
+    border-radius: 8px; outline: none; background: #fff; color: var(--ink);
+  }
+  input:focus { border-color: var(--blue); }
+  input[type=number] { width: 86px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+       border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 12px; }
+
+  .station { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .station:last-of-type { border-bottom: none; }
+  .station .name { flex: 1; font-size: 14.5px; }
+  .station.current { font-weight: 800; color: var(--blue); }
+  .station .mins { font-size: 13px; color: var(--muted); width: 62px; text-align: right; }
+  .station .x { background: transparent; border: none; color: var(--red); font-size: 15px; padding: 2px 8px; cursor: pointer; }
+
+  .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Program Timer</h1>
+  <p class="sub">Countdown for activity blocks, plus a rotation that moves itself along. Nothing is saved and nothing needs a sign-in — it works offline.</p>
+
+  <div class="card clockcard" id="clockcard">
+    <div class="clock" id="clock">10:00</div>
+    <div class="label" id="label">Ready</div>
+    <div class="upnext" id="upnext"></div>
+    <div class="controls">
+      <button class="primary" id="startBtn" type="button">Start</button>
+      <button class="ghost" id="resetBtn" type="button">Reset</button>
+      <button class="ghost" id="skipBtn" type="button" style="display:none;">Next station</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Quick set</h2>
+    <div class="presets" id="presets"></div>
+    <div class="row" style="margin-top:12px;">
+      <input type="number" id="customMins" min="1" max="180" placeholder="Mins" value="15">
+      <button class="ghost" id="customBtn" type="button">Set</button>
+      <input type="text" id="customLabel" placeholder="What's this block? (optional)" style="flex:1;min-width:150px;">
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Station rotation</h2>
+    <div id="stations"></div>
+    <div class="row" style="margin-top:10px;">
+      <input type="text" id="stationName" placeholder="Station name" style="flex:1;min-width:140px;">
+      <input type="number" id="stationMins" min="1" max="120" placeholder="Mins" value="15">
+      <button class="ghost" id="addStationBtn" type="button">Add</button>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <button class="primary" id="runRotationBtn" type="button">Run rotation</button>
+      <button class="danger" id="clearStationsBtn" type="button">Clear all</button>
+    </div>
+    <div class="note">
+      When a station ends you'll hear a chime and it moves to the next one on its own.
+      The rotation is remembered on this device, so a room's usual set-up is still here tomorrow.
+    </div>
+  </div>
+</div>
+
+<script>
+/* Deliberately standalone: no sign-in, no database, no network. A timer
+ * that a staff member props on a shelf to run a room has to work when
+ * the wifi is flaky and must never sit behind a login. The only thing
+ * kept is the station list, in this browser, so a room's usual rotation
+ * survives a refresh.
+ *
+ * Timing is done from a target timestamp rather than by subtracting one
+ * from a counter each tick. Browsers throttle timers in background tabs
+ * -- on a phone that's locked or switched away from, a counting-down
+ * variable drifts badly and the chime lands minutes late. Comparing
+ * against a fixed end time stays correct no matter how irregularly the
+ * ticks arrive.
+ */
+
+const PRESETS = [
+  { label: "Homework help", mins: 30 },
+  { label: "Activity", mins: 20 },
+  { label: "Snack", mins: 15 },
+  { label: "Free time", mins: 10 },
+  { label: "Clean up", mins: 5 },
+  { label: "Two minute warning", mins: 2 },
+];
+
+const STORAGE_KEY = "center-timer-stations";
+
+let endsAt = null;        // timestamp the current block ends
+let remainingMs = 10 * 60 * 1000;
+let running = false;
+let label = "Ready";
+let ticker = null;
+
+let stations = loadStations();
+let rotationIndex = -1;   // -1 = not running a rotation
+
+function loadStations() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+function saveStations() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(stations)); } catch (e) {}
+}
+
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function format(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m + ":" + String(s).padStart(2, "0");
+}
+
+/* A short chime built with the Web Audio API rather than an audio file,
+ * so there's nothing to download and it works offline. Three rising
+ * notes carry across a noisy room better than one beep. */
+function chime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    [0, 0.18, 0.36].forEach((offset, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = [660, 880, 1174][i];
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+      gain.gain.exponentialRampToValueAtTime(0.32, ctx.currentTime + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.42);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + offset);
+      osc.stop(ctx.currentTime + offset + 0.45);
+    });
+    setTimeout(() => { try { ctx.close(); } catch (e) {} }, 1500);
+  } catch (e) {
+    /* Sound is a nicety; a blocked audio context must never break the
+       timer itself. */
+  }
+}
+
+function currentRemaining() {
+  if (!running || endsAt === null) return remainingMs;
+  return Math.max(0, endsAt - Date.now());
+}
+
+function render() {
+  const ms = currentRemaining();
+  document.getElementById("clock").textContent = format(ms);
+  document.getElementById("label").textContent = label;
+
+  const card = document.getElementById("clockcard");
+  card.className = "card clockcard" +
+    (!running && ms === 0 ? " done" : running ? " running" : "") +
+    (running && ms > 0 && ms <= 60000 ? " warn" : "");
+
+  document.getElementById("startBtn").textContent = running ? "Pause" : (ms === 0 ? "Start" : "Start");
+  document.getElementById("startBtn").disabled = ms === 0 && !running && rotationIndex === -1 && remainingMs === 0;
+
+  const inRotation = rotationIndex >= 0 && rotationIndex < stations.length;
+  document.getElementById("skipBtn").style.display = inRotation ? "" : "none";
+  const next = inRotation ? stations[rotationIndex + 1] : null;
+  document.getElementById("upnext").textContent = inRotation
+    ? (next ? "Up next: " + next.name + " (" + next.mins + " min)" : "Last station")
+    : "";
+
+  renderStations();
+}
+
+function renderStations() {
+  const wrap = document.getElementById("stations");
+  wrap.innerHTML = "";
+  if (!stations.length) {
+    wrap.innerHTML = '<div class="note" style="margin:0;">No stations yet. Add a few, then press Run rotation.</div>';
+    return;
+  }
+  stations.forEach((s, i) => {
+    const row = document.createElement("div");
+    row.className = "station" + (i === rotationIndex ? " current" : "");
+    row.innerHTML = '<span class="name">' + esc(s.name) + "</span>" +
+                    '<span class="mins">' + s.mins + " min</span>";
+    const x = document.createElement("button");
+    x.className = "x"; x.type = "button"; x.textContent = "✕"; x.title = "Remove";
+    x.addEventListener("click", () => {
+      stations.splice(i, 1);
+      if (rotationIndex >= stations.length) rotationIndex = -1;
+      saveStations(); render();
+    });
+    row.appendChild(x);
+    wrap.appendChild(row);
+  });
+}
+
+function tick() {
+  if (!running) return;
+  if (currentRemaining() <= 0) {
+    running = false;
+    remainingMs = 0;
+    endsAt = null;
+    chime();
+    if (rotationIndex >= 0 && rotationIndex < stations.length - 1) {
+      // Give the chime a beat before the next block starts, so the room
+      // hears it as "that block is over" rather than a random noise
+      // partway through the new one.
+      setTimeout(() => { startStation(rotationIndex + 1); }, 900);
+    } else if (rotationIndex >= 0) {
+      label = "Rotation complete";
+      rotationIndex = -1;
+    } else {
+      label = label === "Ready" ? "Time" : label + " — time";
+    }
+  }
+  render();
+}
+
+function setBlock(mins, newLabel) {
+  running = false;
+  endsAt = null;
+  remainingMs = Math.max(1, mins) * 60 * 1000;
+  label = newLabel || (mins + " minutes");
+  rotationIndex = -1;
+  render();
+}
+
+function startStation(index) {
+  rotationIndex = index;
+  const station = stations[index];
+  remainingMs = station.mins * 60 * 1000;
+  label = station.name;
+  endsAt = Date.now() + remainingMs;
+  running = true;
+  render();
+}
+
+document.getElementById("startBtn").addEventListener("click", () => {
+  if (running) {
+    remainingMs = currentRemaining();
+    running = false;
+    endsAt = null;
+  } else {
+    if (remainingMs <= 0) return;
+    endsAt = Date.now() + remainingMs;
+    running = true;
+    // Browsers only allow sound after a real interaction; making the
+    // first one happen here means the end-of-block chime is allowed to
+    // play later.
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) { const c = new Ctx(); c.resume && c.resume(); setTimeout(() => c.close(), 200); }
+    } catch (e) {}
+  }
+  render();
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  running = false; endsAt = null; rotationIndex = -1;
+  remainingMs = 10 * 60 * 1000; label = "Ready";
+  render();
+});
+
+document.getElementById("skipBtn").addEventListener("click", () => {
+  if (rotationIndex >= 0 && rotationIndex < stations.length - 1) startStation(rotationIndex + 1);
+  else { running = false; endsAt = null; rotationIndex = -1; label = "Rotation complete"; render(); }
+});
+
+const presetsWrap = document.getElementById("presets");
+PRESETS.forEach(p => {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "ghost";
+  b.textContent = p.label + " · " + p.mins + "m";
+  b.addEventListener("click", () => setBlock(p.mins, p.label));
+  presetsWrap.appendChild(b);
+});
+
+document.getElementById("customBtn").addEventListener("click", () => {
+  const mins = parseInt(document.getElementById("customMins").value, 10);
+  if (!mins || mins < 1) return;
+  setBlock(mins, document.getElementById("customLabel").value.trim() || (mins + " minutes"));
+});
+
+document.getElementById("addStationBtn").addEventListener("click", () => {
+  const name = document.getElementById("stationName").value.trim();
+  const mins = parseInt(document.getElementById("stationMins").value, 10);
+  if (!name || !mins || mins < 1) return;
+  stations.push({ name, mins });
+  document.getElementById("stationName").value = "";
+  saveStations(); render();
+});
+
+document.getElementById("clearStationsBtn").addEventListener("click", () => {
+  if (!stations.length) return;
+  if (!confirm("Remove every station?")) return;
+  stations = []; rotationIndex = -1; saveStations(); render();
+});
+
+document.getElementById("runRotationBtn").addEventListener("click", () => {
+  if (!stations.length) return;
+  startStation(0);
+});
+
+ticker = setInterval(tick, 250);
+render();
+</script>
+</body>
+</html>

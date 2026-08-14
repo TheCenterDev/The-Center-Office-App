@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Count Log</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; }
+
+  select, input[type=text], input[type=date], input[type=email], input[type=password] {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line);
+    border-radius: 8px; outline: none; background: #fff; color: var(--ink);
+  }
+  select:focus, input:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-weight: 700; }
+  .primary { background: var(--blue); color: #fff; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .row label { font-size: 12.5px; font-weight: 700; color: var(--muted); }
+
+  /* Big enough to hit reliably while holding a clipboard and counting
+     children onto a van. */
+  .counter { text-align: center; padding: 6px 0 2px; }
+  .bignum { font-variant-numeric: tabular-nums; font-weight: 800;
+            font-size: clamp(72px, 26vw, 150px); line-height: 1; letter-spacing: -.02em; }
+  .countlabel { font-size: 15px; color: var(--muted); font-weight: 700; min-height: 22px; }
+  .tapbtns { display: flex; gap: 12px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+  .tap { width: 132px; height: 84px; font-size: 34px; border-radius: 16px; }
+  .tapadd { background: var(--blue); color: #fff; }
+  .tapsub { background: #fff; color: var(--blue); border: 2px solid var(--line); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  tfoot td { font-weight: 800; border-top: 2px solid var(--line); border-bottom: none; }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+       border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 12px; }
+  .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+  .empty { text-align: center; color: var(--muted); padding: 28px 16px; font-size: 14px; }
+  .saved { font-size: 12.5px; color: var(--green); min-height: 18px; }
+
+  .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+  .topbar button { padding: 5px 10px; font-size: 12.5px; }
+
+  #authGate { max-width: 360px; margin: 60px auto; }
+  #authGate .card { text-align: center; }
+  #authGate label { text-align: left; display: block; margin-top: 10px; font-size: 13px; }
+  #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
+  #appArea { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Count Log</h1>
+  <p class="sub">Tap to count, then save it. The saved numbers add themselves up for reporting.</p>
+
+  <div id="authGate">
+    <div class="card">
+      <h2 style="border:none;font-size:16px;text-transform:none;letter-spacing:0;">Sign in</h2>
+      <p class="sub" style="margin-bottom: 14px;">Same account as the app and the mobile site.</p>
+      <form id="authForm">
+        <label>Email</label>
+        <input type="email" id="authEmail" autocomplete="username" required style="width:100%;">
+        <label>Password</label>
+        <input type="password" id="authPassword" autocomplete="current-password" required style="width:100%;">
+        <div id="authError"></div>
+        <button class="primary" type="submit" style="width:100%; margin-top:14px;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="appArea">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button class="ghost" id="signOutBtn" type="button">Sign out</button>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <label>Counting</label>
+        <select id="category"></select>
+        <label>at</label>
+        <select id="site"></select>
+      </div>
+
+      <div class="counter">
+        <div class="bignum" id="bignum">0</div>
+        <div class="countlabel" id="countlabel"></div>
+      </div>
+
+      <div class="tapbtns">
+        <button class="tap tapsub" id="minusBtn" type="button">−</button>
+        <button class="tap tapadd" id="plusBtn" type="button">+</button>
+      </div>
+
+      <div class="row" style="margin-top:16px; justify-content:center;">
+        <button class="primary" id="saveBtn" type="button">Save count</button>
+        <button class="ghost" id="zeroBtn" type="button">Reset to 0</button>
+      </div>
+      <div class="row" style="margin-top:8px; justify-content:center;">
+        <span class="saved" id="savedMsg"></span>
+      </div>
+      <div class="note" id="runningNote"></div>
+    </div>
+
+    <div class="card">
+      <h2>Totals</h2>
+      <div class="row" style="margin-bottom:12px;">
+        <label>From</label><input type="date" id="fromDate">
+        <label>to</label><input type="date" id="toDate">
+        <button class="ghost" id="thisMonthBtn" type="button">This month</button>
+        <button class="ghost" id="lastMonthBtn" type="button">Last month</button>
+      </div>
+      <div id="totals"></div>
+      <div class="row" style="margin-top:12px;">
+        <button class="ghost" id="csvBtn" type="button">Download as CSV</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent entries</h2>
+      <div id="recent"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="center-session.js"></script>
+<script>
+/* Counts are saved as one document per tap-session:
+ *   { category, site, date, count, by, byName, at }
+ *
+ * Deliberately one row per save rather than a single running total per
+ * day. Two staff counting the same snack service from different rooms
+ * should add up, not overwrite each other -- and a wrong entry can be
+ * removed without recomputing anything.
+ *
+ * Why this exists: the organisation's own metrics dictionary lists
+ * "# of snacks provided" and "# of meals provided" as reported to
+ * Parkview with no source system at all, and "# of youth benefitting
+ * from building usage" as a Core metric. Those numbers were being
+ * estimated. Tapping a button at snack time makes them real.
+ */
+firebase.initializeApp({
+  apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
+  authDomain: "the-center-office-app.firebaseapp.com",
+  projectId: "the-center-office-app",
+  storageBucket: "the-center-office-app.firebasestorage.app",
+  messagingSenderId: "282726386673",
+  appId: "1:282726386673:web:bdd0c91062a7ac2d0b9250",
+  measurementId: "G-GFVPF8N6ZF",
+});
+const auth = firebase.auth();
+
+// Categories chosen to match what actually gets reported. "Snacks" and
+// "Meals" go to Parkview; "Building usage" is a Core metric; the rest
+// are everyday operational counts staff already do by hand.
+const CATEGORIES = [
+  "Headcount",
+  "Snacks provided",
+  "Meals provided",
+  "Youth using the building",
+  "Volunteers present",
+  "Van riders",
+  "Parent/family attendees",
+];
+
+const SITES = ["Columbia City", "Whitko", "Churubusco", "Off-site / trip", "Other"];
+
+let me = null;
+let entries = [];
+let stop = null;
+let count = 0;
+
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function todayISO() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" +
+         String(d.getDate()).padStart(2, "0");
+}
+
+// ------------------------------------------------------------ auth --
+
+function startApp(profile) {
+  me = {
+    email: (profile.email || "").trim().toLowerCase(),
+    name: profile.name || profile.email,
+  };
+  document.getElementById("whoami").textContent = "Signed in as " + me.name;
+  document.getElementById("authGate").style.display = "none";
+  document.getElementById("appArea").style.display = "block";
+
+  CATEGORIES.forEach(c => {
+    const o = document.createElement("option"); o.value = c; o.textContent = c;
+    document.getElementById("category").appendChild(o);
+  });
+  SITES.forEach(s => {
+    const o = document.createElement("option"); o.value = s; o.textContent = s;
+    document.getElementById("site").appendChild(o);
+  });
+  setThisMonth();
+  renderCounter();
+  watch();
+}
+
+if (CenterSession.isHandedOver()) {
+  const so = document.getElementById("signOutBtn");
+  if (so) so.style.display = "none";
+  startApp(CenterSession.user());
+} else {
+  auth.onAuthStateChanged(user => {
+    if (stop) { stop(); stop = null; }
+    if (!user) {
+      document.getElementById("authGate").style.display = "block";
+      document.getElementById("appArea").style.display = "none";
+      return;
+    }
+    CenterSession.getDoc("users", user.email.trim().toLowerCase()).then(profile => {
+      if (!profile) {
+        document.getElementById("authError").textContent =
+          "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you.";
+        return;
+      }
+      profile.email = user.email;
+      startApp(profile);
+    });
+  });
+}
+
+document.getElementById("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  document.getElementById("authError").textContent = "";
+  auth.signInWithEmailAndPassword(
+    document.getElementById("authEmail").value.trim(),
+    document.getElementById("authPassword").value
+  ).catch(err => { document.getElementById("authError").textContent = err.message; });
+});
+document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
+
+// --------------------------------------------------------- counting --
+
+function renderCounter() {
+  document.getElementById("bignum").textContent = count;
+  const cat = document.getElementById("category").value;
+  const site = document.getElementById("site").value;
+  document.getElementById("countlabel").textContent = cat + " · " + site;
+  document.getElementById("saveBtn").disabled = count === 0;
+
+  // What's already been logged today for this exact combination, so
+  // nobody double-counts a service that a colleague already saved.
+  const today = todayISO();
+  const already = entries
+    .filter(e => e.date === today && e.category === cat && e.site === site)
+    .reduce((sum, e) => sum + (e.count || 0), 0);
+  document.getElementById("runningNote").textContent = already
+    ? "Already logged today for " + cat + " at " + site + ": " + already +
+      ". Saving adds to that rather than replacing it."
+    : "";
+}
+
+document.getElementById("plusBtn").addEventListener("click", () => { count++; renderCounter(); });
+document.getElementById("minusBtn").addEventListener("click", () => {
+  if (count > 0) count--;
+  renderCounter();
+});
+document.getElementById("zeroBtn").addEventListener("click", () => { count = 0; renderCounter(); });
+document.getElementById("category").addEventListener("change", renderCounter);
+document.getElementById("site").addEventListener("change", renderCounter);
+
+// Space bar and the up arrow bump the count -- easier than aiming at a
+// screen while actually watching children.
+document.addEventListener("keydown", e => {
+  if (document.getElementById("appArea").style.display === "none") return;
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test((e.target || {}).tagName || "");
+  if (typing) return;
+  if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); count++; renderCounter(); }
+  if (e.code === "ArrowDown" && count > 0) { e.preventDefault(); count--; renderCounter(); }
+});
+
+document.getElementById("saveBtn").addEventListener("click", () => {
+  if (count === 0) return;
+  const msg = document.getElementById("savedMsg");
+  const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const payload = {
+    category: document.getElementById("category").value,
+    site: document.getElementById("site").value,
+    date: todayISO(),
+    count: count,
+    by: me.email,
+    byName: me.name,
+    at: new Date().toISOString(),
+  };
+  msg.textContent = "Saving…";
+  CenterSession.setDoc("count_log", id, payload).then(() => {
+    msg.textContent = "Saved " + payload.count + " · " + payload.category;
+    count = 0;
+    renderCounter();
+    setTimeout(() => { msg.textContent = ""; }, 3500);
+  }).catch(err => { msg.textContent = "Couldn't save: " + err.message; });
+});
+
+// ------------------------------------------------------------ data --
+
+function watch() {
+  stop = CenterSession.watchCollection("count_log", rows => {
+    entries = rows.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+    renderCounter();
+    renderTotals();
+    renderRecent();
+  }, err => {
+    document.getElementById("totals").innerHTML =
+      '<div class="empty">Couldn\'t load counts: ' + esc(err.message) + "</div>";
+  });
+}
+
+function inRange(e) {
+  const from = document.getElementById("fromDate").value;
+  const to = document.getElementById("toDate").value;
+  if (from && e.date < from) return false;
+  if (to && e.date > to) return false;
+  return true;
+}
+
+function setThisMonth() {
+  const d = new Date();
+  const first = new Date(d.getFullYear(), d.getMonth(), 1);
+  document.getElementById("fromDate").value = first.toISOString().slice(0, 10);
+  document.getElementById("toDate").value = todayISO();
+}
+document.getElementById("thisMonthBtn").addEventListener("click", () => {
+  setThisMonth(); renderTotals();
+});
+document.getElementById("lastMonthBtn").addEventListener("click", () => {
+  const d = new Date();
+  const first = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  const last = new Date(d.getFullYear(), d.getMonth(), 0);
+  document.getElementById("fromDate").value = first.toISOString().slice(0, 10);
+  document.getElementById("toDate").value = last.toISOString().slice(0, 10);
+  renderTotals();
+});
+["fromDate", "toDate"].forEach(id =>
+  document.getElementById(id).addEventListener("change", renderTotals));
+
+function renderTotals() {
+  const rows = entries.filter(inRange);
+  const wrap = document.getElementById("totals");
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty">Nothing counted in this date range yet.</div>';
+    return;
+  }
+
+  // category -> site -> total
+  const bySite = {};
+  const siteSet = {};
+  rows.forEach(e => {
+    bySite[e.category] = bySite[e.category] || {};
+    bySite[e.category][e.site] = (bySite[e.category][e.site] || 0) + (e.count || 0);
+    siteSet[e.site] = true;
+  });
+  const sites = Object.keys(siteSet).sort();
+
+  let html = "<table><thead><tr><th>Category</th>";
+  sites.forEach(s => { html += '<th class="num">' + esc(s) + "</th>"; });
+  html += '<th class="num">Total</th></tr></thead><tbody>';
+
+  let grand = 0;
+  Object.keys(bySite).sort().forEach(cat => {
+    let rowTotal = 0;
+    html += "<tr><td>" + esc(cat) + "</td>";
+    sites.forEach(s => {
+      const v = bySite[cat][s] || 0;
+      rowTotal += v;
+      html += '<td class="num">' + (v || "") + "</td>";
+    });
+    grand += rowTotal;
+    html += '<td class="num">' + rowTotal + "</td></tr>";
+  });
+
+  html += "</tbody><tfoot><tr><td>All</td>";
+  sites.forEach(s => {
+    const t = Object.keys(bySite).reduce((sum, c) => sum + (bySite[c][s] || 0), 0);
+    html += '<td class="num">' + t + "</td>";
+  });
+  html += '<td class="num">' + grand + "</td></tr></tfoot></table>";
+  wrap.innerHTML = html;
+}
+
+document.getElementById("csvBtn").addEventListener("click", () => {
+  const rows = entries.filter(inRange);
+  if (!rows.length) return;
+  const lines = ["Date,Category,Site,Count,Counted by"];
+  rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach(e => {
+    const cell = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+    lines.push([cell(e.date), cell(e.category), cell(e.site), e.count || 0, cell(e.byName || e.by)].join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "count-log-" + document.getElementById("fromDate").value + "-to-" +
+               document.getElementById("toDate").value + ".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+function renderRecent() {
+  const wrap = document.getElementById("recent");
+  const rows = entries.slice(0, 12);
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty">No counts saved yet.</div>';
+    return;
+  }
+  wrap.innerHTML = "";
+  const table = document.createElement("table");
+  table.innerHTML = "<thead><tr><th>Date</th><th>What</th><th>Where</th>" +
+                    '<th class="num">Count</th><th>By</th><th></th></tr></thead>';
+  const tbody = document.createElement("tbody");
+  rows.forEach(e => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + esc(e.date) + "</td><td>" + esc(e.category) + "</td>" +
+                   "<td>" + esc(e.site) + "</td>" + '<td class="num">' + (e.count || 0) + "</td>" +
+                   "<td>" + esc(e.byName || e.by) + "</td>";
+    const td = document.createElement("td");
+    if (e.by === me.email) {
+      const del = document.createElement("button");
+      del.className = "danger"; del.type = "button"; del.textContent = "✕";
+      del.style.padding = "3px 9px"; del.title = "Remove this entry";
+      del.addEventListener("click", () => {
+        if (!confirm("Remove this count of " + e.count + "?")) return;
+        CenterSession.deleteDoc("count_log", e.id).catch(err => alert(err.message));
+      });
+      td.appendChild(del);
+    }
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+}
+</script>
+</body>
+</html>
