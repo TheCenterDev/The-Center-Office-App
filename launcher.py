@@ -65,6 +65,7 @@ without installing Python.
 """
 
 import base64
+import datetime
 import hashlib
 import os
 import html
@@ -1263,6 +1264,71 @@ def firestore_delete_profile(id_token: str, email: str):
     _http_json(f"{FIRESTORE_URL}/users/{key}", token=id_token, method="DELETE")
 
 
+def firestore_due_reminders(id_token: str, email: str) -> list:
+    """Calendar dates whose reminder window has opened, for the banner
+    at the top of the app (html/Calendar.html writes these).
+
+    Three separate queries rather than one listing, because
+    firestore.rules is a permission check and not a filter: asking for
+    every event would be refused outright, since most of them belong to
+    other people. So we ask only the questions we're allowed to ask --
+    mine, team-wide, addressed to me -- and merge the answers.
+
+    Never raises. A reminder banner failing to appear is a small loss;
+    it taking the whole launcher down with it on a flaky connection
+    would not be."""
+    me = email.strip().lower()
+    today = datetime.date.today()
+    conditions = [
+        ("author", "EQUAL", {"stringValue": me}),
+        ("visibility", "EQUAL", {"stringValue": "team"}),
+        ("recipients", "ARRAY_CONTAINS", {"stringValue": me}),
+    ]
+    found = {}
+    for field, op, value in conditions:
+        body = {
+            "structuredQuery": {
+                "from": [{"collectionId": "calendar_events"}],
+                "where": {
+                    "fieldFilter": {
+                        "field": {"fieldPath": field},
+                        "op": op,
+                        "value": value,
+                    }
+                },
+                "limit": 200,
+            }
+        }
+        try:
+            rows = _http_json(f"{FIRESTORE_URL}:runQuery", body, token=id_token)
+        except FirebaseError:
+            continue
+        for row in rows or []:
+            document = row.get("document")
+            if not document:
+                continue
+            found[document.get("name", "")] = _from_firestore_fields(
+                document.get("fields", {})
+            )
+
+    due = []
+    for event in found.values():
+        try:
+            when = datetime.date.fromisoformat(str(event.get("date", "")))
+        except ValueError:
+            continue
+        away = (when - today).days
+        lead = event.get("remindDays") or 0
+        try:
+            lead = int(lead)
+        except (TypeError, ValueError):
+            lead = 0
+        if 0 <= away <= lead:
+            due.append({"title": str(event.get("title", "")), "away": away})
+    due.sort(key=lambda item: item["away"])
+    return due
+
+
 def display_name_from_filename(filename: str) -> str:
     name = Path(filename).stem
     name = ORDER_PREFIX_RE.sub("", name)
@@ -2099,8 +2165,20 @@ class LauncherApp:
 
         self._build_sidebar(container)
 
-        self.content_frame = ctk.CTkFrame(container, fg_color=BODY_BG, corner_radius=0)
-        self.content_frame.pack(side="left", fill="both", expand=True)
+        # Sidebar sits to the left; everything else stacks vertically to
+        # its right, so the reminder strip can sit above the content
+        # without every page having to know about it. Page renderers
+        # clear content_frame's children, which would wipe out a banner
+        # placed inside it the moment anyone navigated.
+        right_side = ctk.CTkFrame(container, fg_color=BODY_BG, corner_radius=0)
+        right_side.pack(side="left", fill="both", expand=True)
+
+        self.reminder_bar = ctk.CTkFrame(right_side, fg_color=ACCENT_SOFT, corner_radius=0)
+        # Deliberately not packed yet -- it appears only if something is
+        # actually due, so an empty strip never eats vertical space.
+
+        self.content_frame = ctk.CTkFrame(right_side, fg_color=BODY_BG, corner_radius=0)
+        self.content_frame.pack(fill="both", expand=True)
         # open_default_page=False during _rebuild_ui — it immediately
         # re-opens whatever page was actually showing (which could well
         # be a different one, e.g. Settings) via _restore_view, so
@@ -2111,6 +2189,84 @@ class LauncherApp:
                 self._show_apps()
             else:
                 self._show_home()
+
+        self._load_reminders()
+
+    # -------------------------------------------------------- reminders --
+    def _load_reminders(self):
+        """Fetches anything due from the Calendar in the background and,
+        if there is any, draws a strip above the content area.
+
+        Deliberately a banner rather than a system notification: a
+        notification needs per-machine permission and silently does
+        nothing when it isn't granted, whereas this cannot fail
+        invisibly. Runs off the UI thread because it's a network call,
+        and never blocks startup -- the app is fully usable whether or
+        not this ever comes back."""
+        if self.current_user is None or not getattr(self, "id_token", ""):
+            return
+        email = self.current_user.get("email", "")
+        if not email:
+            return
+
+        def work():
+            try:
+                due = firestore_due_reminders(self.id_token, email)
+            except Exception:
+                return
+            if due:
+                self.root.after(0, lambda: self._show_reminders(due))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_reminders(self, due):
+        bar = getattr(self, "reminder_bar", None)
+        if bar is None or not bar.winfo_exists():
+            return
+        for widget in bar.winfo_children():
+            widget.destroy()
+
+        inner = ctk.CTkFrame(bar, fg_color="transparent")
+        inner.pack(fill="x", padx=18, pady=(8, 8))
+
+        for item in due[:4]:
+            if item["away"] == 0:
+                lead = "Today: "
+            elif item["away"] == 1:
+                lead = "Tomorrow: "
+            else:
+                lead = f"In {item['away']} days: "
+            ctk.CTkLabel(
+                inner,
+                text=lead + item["title"],
+                font=ctk.CTkFont(size=F(13)),
+                text_color=TEXT_DARK,
+                anchor="w",
+                justify="left",
+            ).pack(fill="x", anchor="w")
+
+        if len(due) > 4:
+            ctk.CTkLabel(
+                inner,
+                text=f"…and {len(due) - 4} more.",
+                font=ctk.CTkFont(size=F(12)),
+                text_color=TEXT_MUTED,
+                anchor="w",
+            ).pack(fill="x", anchor="w")
+
+        dismiss = ctk.CTkButton(
+            bar,
+            text="✕",
+            width=28,
+            fg_color="transparent",
+            hover_color=ACCENT_SOFT,
+            text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=F(14)),
+            command=lambda: bar.pack_forget(),
+        )
+        dismiss.place(relx=1.0, x=-10, y=8, anchor="ne")
+
+        bar.pack(fill="x", before=self.content_frame)
 
     def _rebuild_ui(self):
         """Tears down and rebuilds the whole sidebar + content pane, then

@@ -54,6 +54,7 @@
     els.teamView = document.getElementById("team-view");
     els.topbarTitle = document.getElementById("topbar-title");
     els.footerUserName = document.getElementById("footer-user-name");
+    els.reminderBar = document.getElementById("reminder-bar");
     els.settingsNavBtn = document.getElementById("settings-nav-btn");
     els.teamNavBtn = document.getElementById("team-nav-btn");
 
@@ -126,6 +127,7 @@
     if (!state.appStarted) {
       state.appStarted = true;
       startApp();
+      loadReminders();
     } else if (state.view === "settings") {
       renderSettingsView(); // re-render so a change made on another device shows up live
     }
@@ -306,6 +308,144 @@
       }
     });
     return btn;
+  }
+
+  // -------------------------------------------------------- reminders --
+  //
+  // Calendar dates whose reminder window has opened, shown once at the
+  // top of the app. Deliberately not push notifications: those need a
+  // per-person permission grant, and on iPhone only work at all if the
+  // site has been added to the home screen. A banner you cannot miss
+  // when you open the app reaches everyone with no setup, and fails
+  // visibly rather than silently.
+  //
+  // The three-query shape is forced by the security rules: they are a
+  // permission check, not a filter, so asking for every event would be
+  // refused outright because most events belong to other people.
+
+  function dayKey(d) {
+    return d.getFullYear() + "-" +
+      String(d.getMonth() + 1).padStart(2, "0") + "-" +
+      String(d.getDate()).padStart(2, "0");
+  }
+
+  function daysUntil(key) {
+    var bits = String(key || "").split("-");
+    var then = new Date(Number(bits[0]), Number(bits[1]) - 1, Number(bits[2]));
+    var now = new Date();
+    now = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((then - now) / 86400000);
+  }
+
+  function dismissedToday() {
+    try {
+      var raw = JSON.parse(window.localStorage.getItem("center-reminders-dismissed") || "{}");
+      return raw.date === dayKey(new Date()) ? (raw.ids || []) : [];
+    } catch (e) { return []; }
+  }
+
+  function dismissReminders(ids) {
+    try {
+      window.localStorage.setItem("center-reminders-dismissed",
+        JSON.stringify({ date: dayKey(new Date()), ids: ids }));
+    } catch (e) { /* private browsing; the banner just returns next load */ }
+  }
+
+  function loadReminders() {
+    if (!window.firebase || !window.firebase.firestore || !state.profile) return;
+    var db = window.firebase.firestore();
+    var me = state.profile.email;
+    var col = db.collection("calendar_events");
+
+    // allSettled, not all: three separate queries are needed because the
+    // rules are a permission check rather than a filter, and if one of
+    // them is ever refused, showing the reminders from the other two
+    // beats showing none at all. The banner is a convenience -- it
+    // should degrade, not vanish.
+    Promise.allSettled([
+      col.where("author", "==", me).get(),
+      col.where("visibility", "==", "team").get(),
+      col.where("recipients", "array-contains", me).get(),
+    ]).then(function (results) {
+      var seen = {};
+      var due = [];
+      results.forEach(function (result) {
+        if (result.status !== "fulfilled") {
+          console.error("Reminder query refused:", result.reason);
+          return;
+        }
+        result.value.forEach(function (doc) {
+          if (seen[doc.id]) return;
+          seen[doc.id] = true;
+          var ev = doc.data();
+          var away = daysUntil(ev.date);
+          if (away >= 0 && away <= (ev.remindDays || 0)) {
+            due.push({ id: doc.id, title: ev.title, date: ev.date, away: away });
+          }
+        });
+      });
+      renderReminders(due);
+    }).catch(function (err) {
+      // A missing collection or a rules problem shouldn't take the whole
+      // app down -- reminders are an extra, not the point of the site.
+      console.error("Couldn't load reminders:", err);
+    });
+  }
+
+  function renderReminders(due) {
+    var skip = dismissedToday();
+    due = due.filter(function (d) { return skip.indexOf(d.id) === -1; });
+    if (!due.length) { els.reminderBar.style.display = "none"; return; }
+
+    due.sort(function (a, b) { return a.away - b.away; });
+
+    els.reminderBar.innerHTML = "";
+    var body = document.createElement("div");
+    body.className = "reminder-body";
+
+    due.slice(0, 4).forEach(function (d) {
+      var line = document.createElement("div");
+      line.className = "reminder-line";
+      var when = document.createElement("span");
+      when.className = "reminder-when";
+      when.textContent = d.away === 0 ? "Today: "
+        : d.away === 1 ? "Tomorrow: "
+        : "In " + d.away + " days: ";
+      line.appendChild(when);
+      line.appendChild(document.createTextNode(d.title));
+      body.appendChild(line);
+    });
+
+    if (due.length > 4) {
+      var more = document.createElement("div");
+      more.className = "reminder-line";
+      more.textContent = "…and " + (due.length - 4) + " more.";
+      body.appendChild(more);
+    }
+
+    var calendar = doc_for("Calendar.html");
+    if (calendar) {
+      var open = document.createElement("button");
+      open.type = "button";
+      open.className = "reminder-open";
+      open.textContent = "Open the calendar";
+      open.addEventListener("click", function () { openProgram(calendar); });
+      body.appendChild(open);
+    }
+
+    var close = document.createElement("button");
+    close.type = "button";
+    close.className = "reminder-dismiss";
+    close.setAttribute("aria-label", "Dismiss reminders for today");
+    close.textContent = "\u00d7";
+    close.addEventListener("click", function () {
+      dismissReminders(due.map(function (d) { return d.id; }));
+      els.reminderBar.style.display = "none";
+    });
+
+    els.reminderBar.appendChild(body);
+    els.reminderBar.appendChild(close);
+    els.reminderBar.style.display = "flex";
   }
 
   function doc_for(file) {

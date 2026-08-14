@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendar</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --blue-soft: #eaf0fd;
+    --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea;
+    --amber: #8a5a00; --amber-bg: #fff4d6;
+    --purple: #5b3fa8; --purple-bg: #efe9fb;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; }
+
+  select, input[type=text], input[type=date], input[type=time], input[type=email], input[type=password], textarea {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line);
+    border-radius: 8px; outline: none; background: #fff; color: var(--ink); width: 100%;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  select:focus, input:focus, textarea:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-weight: 700; }
+  .primary { background: var(--blue); color: #fff; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 150px; }
+  .field label { font-size: 12px; font-weight: 700; color: var(--muted); }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+       border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 12px; }
+  .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
+  .empty { text-align: center; color: var(--muted); padding: 28px 16px; font-size: 14px; }
+  .saved { font-size: 12.5px; color: var(--green); min-height: 18px; }
+
+  .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+  .topbar button { padding: 5px 10px; font-size: 12.5px; }
+
+  /* ---- month navigation ---- */
+  .monthbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .monthbar .title { font-size: 17px; font-weight: 800; }
+  .navbtns { display: flex; gap: 6px; }
+  .navbtns button { padding: 7px 13px; font-size: 14px; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 7px 14px; font-size: 13px; }
+  .tabs button.on { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+  /* ---- month grid ---- */
+  .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--line);
+          border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .dow { background: #fbfcfd; text-align: center; font-size: 11px; font-weight: 800;
+         text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 7px 2px; }
+  .day { background: #fff; min-height: 92px; padding: 5px 5px 7px; cursor: pointer; }
+  .day:hover { background: #fafbfe; }
+  .day.other { background: #fbfbfc; }
+  .day.other .daynum { color: #c3c8d2; }
+  .day.today .daynum { background: var(--blue); color: #fff; border-radius: 999px; }
+  .day.picked { outline: 2px solid var(--blue); outline-offset: -2px; }
+  .daynum { display: inline-block; min-width: 22px; height: 22px; line-height: 22px; text-align: center;
+            font-size: 12.5px; font-weight: 700; margin-bottom: 3px; }
+  .chip { display: block; font-size: 11.5px; line-height: 1.3; padding: 2px 5px; border-radius: 5px;
+          margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip.team { background: var(--blue-soft); color: var(--blue); }
+  .chip.direct { background: var(--purple-bg); color: var(--purple); }
+  .chip.private { background: #eef0f4; color: #4a5164; }
+  .chip.due { background: var(--amber-bg); color: var(--amber); }
+  .more { font-size: 10.5px; color: var(--muted); padding-left: 5px; }
+
+  /* ---- event list ---- */
+  .ev { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .ev:last-child { border-bottom: none; }
+  .ev h3 { font-size: 14.5px; margin-bottom: 3px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .ev .when { font-size: 12.5px; color: var(--muted); }
+  .ev .body { font-size: 13.5px; color: #333a4d; margin-top: 5px; white-space: pre-wrap; }
+  .ev .meta { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+  .ev .actions { margin-top: 8px; display: flex; gap: 8px; }
+  .ev .actions button { padding: 5px 11px; font-size: 12px; }
+  .pill { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+          padding: 2px 7px; border-radius: 999px; }
+  .pill.team { background: var(--blue-soft); color: var(--blue); }
+  .pill.direct { background: var(--purple-bg); color: var(--purple); }
+  .pill.private { background: #eef0f4; color: #4a5164; }
+  .pill.due { background: var(--amber-bg); color: var(--amber); }
+  .pill.today { background: var(--green-bg); color: var(--green); }
+  .daygroup { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+              color: var(--muted); margin: 16px 0 2px; }
+  .daygroup:first-child { margin-top: 0; }
+
+  #peopleWrap { display: none; margin-top: 10px; }
+  #peopleList { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 4px; }
+  #peopleList label { display: flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 500; }
+  #peopleList input[type=checkbox] { width: auto; }
+
+  #authGate { max-width: 360px; margin: 60px auto; }
+  #authGate .card { text-align: center; }
+  #authGate label { text-align: left; display: block; margin-top: 10px; font-size: 13px; }
+  #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
+  #appArea { display: none; }
+
+  @media (max-width: 620px) {
+    .day { min-height: 68px; }
+    .chip { font-size: 10.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Calendar</h1>
+  <p class="sub">Dates for yourself, for specific people, or for the whole team. Anything due soon shows up as a reminder when you open the app.</p>
+
+  <div id="authGate">
+    <div class="card">
+      <h2 style="border:none;font-size:16px;text-transform:none;letter-spacing:0;">Sign in</h2>
+      <p class="sub" style="margin-bottom: 14px;">Same account as the app and the mobile site.</p>
+      <form id="authForm">
+        <label>Email</label>
+        <input type="email" id="authEmail" autocomplete="username" required>
+        <label>Password</label>
+        <input type="password" id="authPassword" autocomplete="current-password" required>
+        <div id="authError"></div>
+        <button class="primary" type="submit" style="width:100%; margin-top:14px;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="appArea">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button class="ghost" id="signOutBtn" type="button">Sign out</button>
+    </div>
+
+    <div class="card">
+      <div class="monthbar">
+        <div class="title" id="monthTitle"></div>
+        <div class="navbtns">
+          <button class="ghost" id="prevBtn" type="button">‹</button>
+          <button class="ghost" id="todayBtn" type="button">Today</button>
+          <button class="ghost" id="nextBtn" type="button">›</button>
+        </div>
+        <div class="tabs" id="viewTabs">
+          <button type="button" data-view="month" class="on">Month</button>
+          <button type="button" data-view="upcoming">Upcoming</button>
+        </div>
+      </div>
+
+      <div id="monthView">
+        <div class="grid" id="grid"></div>
+        <div class="note" id="monthNote"></div>
+      </div>
+
+      <div id="upcomingView" style="display:none;">
+        <div id="upcomingList"></div>
+      </div>
+    </div>
+
+    <div class="card" id="dayCard" style="display:none;">
+      <h2 id="dayTitle">Day</h2>
+      <div id="dayList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Add a date</h2>
+      <div class="row">
+        <div class="field" style="flex:2 1 260px;">
+          <label for="evTitle">What is it?</label>
+          <input type="text" id="evTitle" placeholder="e.g. Board meeting" autocomplete="off">
+        </div>
+        <div class="field" style="flex:0 0 155px;">
+          <label for="evDate">Date</label>
+          <input type="date" id="evDate">
+        </div>
+        <div class="field" style="flex:0 0 120px;">
+          <label for="evTime">Time (optional)</label>
+          <input type="time" id="evTime">
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <div class="field">
+          <label for="evVisibility">Who sees it?</label>
+          <select id="evVisibility">
+            <option value="private">Just me</option>
+            <option value="team">The whole team</option>
+            <option value="direct">Specific people</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="evRemind">Remind</label>
+          <select id="evRemind">
+            <option value="0">On the day</option>
+            <option value="1">1 day before</option>
+            <option value="2">2 days before</option>
+            <option value="3">3 days before</option>
+            <option value="7">A week before</option>
+            <option value="14">Two weeks before</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="evLocation">Where (optional)</label>
+          <input type="text" id="evLocation" placeholder="e.g. Columbia City" autocomplete="off">
+        </div>
+      </div>
+
+      <div id="peopleWrap">
+        <label style="font-size:12px;font-weight:700;color:var(--muted);">Who is this for?</label>
+        <div id="peopleList"></div>
+      </div>
+
+      <div class="field" style="margin-top:12px;">
+        <label for="evNotes">Notes (optional)</label>
+        <textarea id="evNotes" placeholder="Anything worth remembering about this"></textarea>
+      </div>
+
+      <div class="row" style="margin-top:14px; align-items:center;">
+        <button class="primary" id="saveBtn" type="button">Save date</button>
+        <span class="saved" id="saveMsg"></span>
+      </div>
+      <div class="note" id="privacyNote"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="./center-session.js"></script>
+<script>
+/* Calendar dates live in the shared database, one document per event:
+ *   { title, date "YYYY-MM-DD", time "HH:MM", location, notes,
+ *     visibility, recipients[], remindDays, author, authorName,
+ *     created, updated }
+ *
+ * visibility works exactly as it does in Notes:
+ *   "private" -- only the author
+ *   "team"    -- everyone signed in with a profile
+ *   "direct"  -- the author plus the people listed in recipients
+ *
+ * As with Notes, the privacy is enforced by firestore.rules on the
+ * server. Asking for "all events" would be refused outright, because
+ * most of them belong to other people -- so the page asks the three
+ * narrow questions it is allowed to ask and merges the answers.
+ *
+ * The recurring reporting obligations (JDAI, surveys, year-end
+ * close-out) are read from reporting_calendar and drawn on the grid
+ * read-only. They are edited in the Reporting Calendar tool, which
+ * stays the one place those are defined -- showing them here is so
+ * "what's coming up" is answerable in a single place, not so there are
+ * two lists to keep in step.
+ */
+firebase.initializeApp({
+  apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
+  authDomain: "the-center-office-app.firebaseapp.com",
+  projectId: "the-center-office-app",
+  storageBucket: "the-center-office-app.firebasestorage.app",
+  messagingSenderId: "282726386673",
+  appId: "1:282726386673:web:bdd0c91062a7ac2d0b9250",
+  measurementId: "G-GFVPF8N6ZF",
+});
+const auth = firebase.auth();
+
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MAX_CHIPS = 3;
+
+let me = null;
+let events = [];
+let obligations = [];      // from reporting_calendar, read-only
+let people = [];
+let stopWatching = null;
+let cursor = new Date();   // which month the grid is showing
+let picked = null;         // "YYYY-MM-DD" of the selected day, or null
+let view = "month";
+
+function esc(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// ------------------------------------------------------------ dates --
+//
+// Everything is handled as a plain "YYYY-MM-DD" string rather than a
+// Date. Dates here mean a calendar day, not an instant: an event on the
+// 5th is on the 5th regardless of what timezone the phone thinks it is
+// in, and parsing "2026-08-05" with new Date() would make it midnight
+// UTC, which is the 4th once you're west of Greenwich. Strings compare
+// correctly with < and >, so they're also easier to sort.
+
+function key(d) {
+  return d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getDate()).padStart(2, "0");
+}
+function todayKey() { return key(new Date()); }
+function parseKey(s) {
+  const bits = String(s || "").split("-");
+  return new Date(Number(bits[0]), Number(bits[1]) - 1, Number(bits[2]));
+}
+function daysBetween(fromKey, toKey) {
+  return Math.round((parseKey(toKey) - parseKey(fromKey)) / 86400000);
+}
+function addDays(k, n) {
+  const d = parseKey(k);
+  d.setDate(d.getDate() + n);
+  return key(d);
+}
+function humanDay(k) {
+  const diff = daysBetween(todayKey(), k);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  if (diff === -1) return "Yesterday";
+  const d = parseKey(k);
+  return DOW[d.getDay()] + ", " + MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate();
+}
+function humanTime(t) {
+  if (!t) return "";
+  const bits = String(t).split(":");
+  let h = Number(bits[0]);
+  const m = bits[1] || "00";
+  const ampm = h >= 12 ? "pm" : "am";
+  h = h % 12; if (h === 0) h = 12;
+  return h + ":" + m + ampm;
+}
+
+// ------------------------------------------------------------ auth --
+
+function startApp(profile) {
+  me = {
+    email: (profile.email || "").trim().toLowerCase(),
+    name: profile.name || profile.email,
+    role: profile.role || "staff",
+  };
+  document.getElementById("whoami").textContent = "Signed in as " + me.name;
+  document.getElementById("authGate").style.display = "none";
+  document.getElementById("appArea").style.display = "block";
+  document.getElementById("privacyNote").textContent =
+    "“Just me” dates are hidden from everyone else here, including Directors. " +
+    "Team dates are visible to everyone signed in, so put anything sensitive on a " +
+    "“specific people” date instead.";
+  document.getElementById("evDate").value = todayKey();
+  loadPeople();
+  loadObligations();
+  watch();
+  render();
+}
+
+if (CenterSession.isHandedOver()) {
+  const signOut = document.getElementById("signOutBtn");
+  if (signOut) signOut.style.display = "none";
+  startApp(CenterSession.user());
+} else {
+  auth.onAuthStateChanged(user => {
+    if (stopWatching) { stopWatching(); stopWatching = null; }
+    if (!user) {
+      document.getElementById("authGate").style.display = "block";
+      document.getElementById("appArea").style.display = "none";
+      return;
+    }
+    CenterSession.getDoc("users", user.email.trim().toLowerCase()).then(profile => {
+      if (!profile) {
+        document.getElementById("authError").textContent =
+          "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you.";
+        return;
+      }
+      profile.email = user.email;
+      startApp(profile);
+    });
+  });
+}
+
+document.getElementById("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  document.getElementById("authError").textContent = "";
+  auth.signInWithEmailAndPassword(
+    document.getElementById("authEmail").value.trim(),
+    document.getElementById("authPassword").value
+  ).catch(err => { document.getElementById("authError").textContent = err.message; });
+});
+document.getElementById("signOutBtn").addEventListener("click", () => auth.signOut());
+
+// ------------------------------------------------------------ data --
+
+function loadPeople() {
+  CenterSession.listCollection("users").then(rows => {
+    people = rows
+      .map(r => ({ email: r.id, name: r.name || r.id }))
+      .filter(p => p.email !== me.email)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    renderPeople();
+  }).catch(() => { people = null; renderPeople(); });
+}
+
+function loadObligations() {
+  CenterSession.getDoc("reporting_calendar", "default").then(doc => {
+    obligations = ((doc && doc.items) || []).filter(i => i.active !== false && i.day);
+    render();
+  }).catch(() => { obligations = []; });
+}
+
+function watch() {
+  stopWatching = CenterSession.watchQueryUnion([
+    { collection: "calendar_events", field: "author",     op: "EQUAL",          value: me.email },
+    { collection: "calendar_events", field: "visibility", op: "EQUAL",          value: "team" },
+    { collection: "calendar_events", field: "recipients", op: "ARRAY_CONTAINS", value: me.email },
+  ], rows => {
+    events = rows.slice().sort((a, b) =>
+      String(a.date || "").localeCompare(String(b.date || "")) ||
+      String(a.time || "").localeCompare(String(b.time || "")));
+    render();
+  }, err => {
+    document.getElementById("upcomingList").innerHTML =
+      '<div class="empty">Couldn\'t load the calendar: ' + esc(err.message) + "</div>";
+  });
+}
+
+/* Reporting obligations that land in a given month, as pseudo-events.
+ * A monthly obligation lands every month; a yearly one only in its own
+ * month. Items with no specific day (day 0) are skipped -- the
+ * Reporting Calendar treats those as "sometime that month", and
+ * inventing a date for them here would be making something up. */
+function obligationsIn(year, monthIndex) {
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  const out = [];
+  obligations.forEach(item => {
+    const applies = item.cadence === "monthly" || (item.month || 0) - 1 === monthIndex;
+    if (!applies) return;
+    out.push({
+      id: "due:" + item.id + ":" + year + "-" + monthIndex,
+      title: item.text,
+      date: key(new Date(year, monthIndex, Math.min(item.day, lastDay))),
+      time: "",
+      visibility: "due",
+      party: item.party || "",
+      isObligation: true,
+    });
+  });
+  return out;
+}
+
+// ----------------------------------------------------------- write --
+
+document.getElementById("evVisibility").addEventListener("change", e => {
+  document.getElementById("peopleWrap").style.display = e.target.value === "direct" ? "block" : "none";
+});
+
+function renderPeople() {
+  const wrap = document.getElementById("peopleList");
+  wrap.innerHTML = "";
+  if (people === null) {
+    // Only Admin/Director may list everyone (see firestore.rules), so
+    // for staff this quietly falls back to typing addresses rather than
+    // showing an error for something that isn't broken.
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "manualRecipients";
+    input.placeholder = "Email addresses, separated by commas";
+    wrap.appendChild(input);
+    return;
+  }
+  people.forEach(p => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = p.email; cb.className = "recipient";
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(p.name));
+    wrap.appendChild(label);
+  });
+}
+
+function chosenRecipients() {
+  const manual = document.getElementById("manualRecipients");
+  if (manual) {
+    return manual.value.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  }
+  return Array.from(document.querySelectorAll(".recipient:checked")).map(cb => cb.value);
+}
+
+document.getElementById("saveBtn").addEventListener("click", () => {
+  const title = document.getElementById("evTitle").value.trim();
+  const date = document.getElementById("evDate").value;
+  const visibility = document.getElementById("evVisibility").value;
+  const msg = document.getElementById("saveMsg");
+  const recipients = visibility === "direct" ? chosenRecipients() : [];
+
+  if (!title) { msg.textContent = "Give it a name first."; return; }
+  if (!date) { msg.textContent = "Pick a date."; return; }
+  if (visibility === "direct" && !recipients.length) {
+    msg.textContent = "Pick at least one person to put this on the calendar for.";
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  msg.textContent = "Saving…";
+
+  CenterSession.setDoc("calendar_events", id, {
+    title: title,
+    date: date,
+    time: document.getElementById("evTime").value || "",
+    location: document.getElementById("evLocation").value.trim(),
+    notes: document.getElementById("evNotes").value.trim(),
+    visibility: visibility,
+    recipients: recipients,
+    remindDays: parseInt(document.getElementById("evRemind").value, 10) || 0,
+    author: me.email,
+    authorName: me.name,
+    created: now,
+    updated: now,
+  }).then(() => {
+    document.getElementById("evTitle").value = "";
+    document.getElementById("evTime").value = "";
+    document.getElementById("evLocation").value = "";
+    document.getElementById("evNotes").value = "";
+    document.querySelectorAll(".recipient:checked").forEach(cb => { cb.checked = false; });
+    const manual = document.getElementById("manualRecipients");
+    if (manual) manual.value = "";
+    msg.textContent = "Saved.";
+    setTimeout(() => { msg.textContent = ""; }, 2500);
+  }).catch(err => { msg.textContent = "Couldn't save: " + err.message; });
+});
+
+function deleteEvent(ev) {
+  const who = ev.visibility === "private" ? "" :
+    " It'll disappear for everyone who could see it.";
+  if (!confirm("Delete “" + ev.title + "”?" + who)) return;
+  CenterSession.deleteDoc("calendar_events", ev.id)
+    .catch(err => alert("Couldn't delete: " + err.message));
+}
+
+// ---------------------------------------------------------- render --
+
+function pillFor(ev) {
+  if (ev.isObligation) return '<span class="pill due">' + esc(ev.party || "Due") + "</span>";
+  if (ev.visibility === "team") return '<span class="pill team">Team</span>';
+  if (ev.visibility === "direct") {
+    return '<span class="pill direct">' +
+      (ev.author === me.email ? "Sent" : "For you") + "</span>";
+  }
+  return '<span class="pill private">Just me</span>';
+}
+
+function render() {
+  if (!me) return;
+  document.getElementById("monthTitle").textContent =
+    MONTHS[cursor.getMonth()] + " " + cursor.getFullYear();
+  document.getElementById("monthView").style.display = view === "month" ? "block" : "none";
+  document.getElementById("upcomingView").style.display = view === "upcoming" ? "block" : "none";
+  Array.from(document.querySelectorAll("#viewTabs button")).forEach(b => {
+    b.className = b.getAttribute("data-view") === view ? "on" : "";
+  });
+  if (view === "month") renderGrid(); else renderUpcoming();
+  renderDay();
+}
+
+function eventsOn(k, extra) {
+  const all = events.concat(extra || []);
+  return all.filter(e => e.date === k);
+}
+
+function renderGrid() {
+  const year = cursor.getFullYear();
+  const monthIndex = cursor.getMonth();
+  const due = obligationsIn(year, monthIndex);
+  const first = new Date(year, monthIndex, 1);
+  const start = new Date(year, monthIndex, 1 - first.getDay());
+  const grid = document.getElementById("grid");
+  const today = todayKey();
+
+  grid.innerHTML = "";
+  DOW.forEach(d => {
+    const el = document.createElement("div");
+    el.className = "dow";
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const k = key(d);
+    const cell = document.createElement("div");
+    cell.className = "day" +
+      (d.getMonth() !== monthIndex ? " other" : "") +
+      (k === today ? " today" : "") +
+      (k === picked ? " picked" : "");
+
+    const num = document.createElement("div");
+    num.className = "daynum";
+    num.textContent = d.getDate();
+    cell.appendChild(num);
+
+    const items = eventsOn(k, due);
+    items.slice(0, MAX_CHIPS).forEach(ev => {
+      const chip = document.createElement("div");
+      chip.className = "chip " + (ev.isObligation ? "due" : ev.visibility);
+      chip.textContent = (ev.time ? humanTime(ev.time) + " " : "") + ev.title;
+      chip.title = ev.title;
+      cell.appendChild(chip);
+    });
+    if (items.length > MAX_CHIPS) {
+      const more = document.createElement("div");
+      more.className = "more";
+      more.textContent = "+" + (items.length - MAX_CHIPS) + " more";
+      cell.appendChild(more);
+    }
+
+    cell.addEventListener("click", () => {
+      picked = (picked === k) ? null : k;
+      if (picked) document.getElementById("evDate").value = picked;
+      render();
+    });
+    grid.appendChild(cell);
+  }
+
+  // Obligations with no specific day still need saying somewhere, or
+  // they silently vanish from the one place people are now told to look.
+  const vague = obligations.filter(i =>
+    (i.cadence === "monthly" || (i.month || 0) - 1 === monthIndex) && !i.day);
+  document.getElementById("monthNote").textContent = vague.length
+    ? "Also this month, with no fixed day: " + vague.map(i => i.text).join("; ")
+    : "";
+}
+
+function renderUpcoming() {
+  const from = todayKey();
+  const to = addDays(from, 60);
+  let due = [];
+  const cur = new Date();
+  for (let m = 0; m < 3; m++) {
+    const d = new Date(cur.getFullYear(), cur.getMonth() + m, 1);
+    due = due.concat(obligationsIn(d.getFullYear(), d.getMonth()));
+  }
+  const rows = events.concat(due)
+    .filter(e => e.date >= from && e.date <= to)
+    .sort((a, b) => a.date.localeCompare(b.date) ||
+      String(a.time || "").localeCompare(String(b.time || "")));
+
+  const list = document.getElementById("upcomingList");
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.innerHTML = '<div class="empty">Nothing on the calendar for the next two months.</div>';
+    return;
+  }
+  let lastDate = null;
+  rows.forEach(ev => {
+    if (ev.date !== lastDate) {
+      const h = document.createElement("div");
+      h.className = "daygroup";
+      h.textContent = humanDay(ev.date);
+      list.appendChild(h);
+      lastDate = ev.date;
+    }
+    list.appendChild(eventEl(ev));
+  });
+}
+
+function renderDay() {
+  const card = document.getElementById("dayCard");
+  if (!picked || view !== "month") { card.style.display = "none"; return; }
+  const due = obligationsIn(cursor.getFullYear(), cursor.getMonth());
+  const items = eventsOn(picked, due);
+  card.style.display = "block";
+  document.getElementById("dayTitle").textContent = humanDay(picked);
+  const list = document.getElementById("dayList");
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">Nothing on this day yet. Add one below — the date is already filled in.</div>';
+    return;
+  }
+  items.forEach(ev => list.appendChild(eventEl(ev)));
+}
+
+function eventEl(ev) {
+  const el = document.createElement("div");
+  el.className = "ev";
+
+  const parts = [];
+  if (ev.time) parts.push(humanTime(ev.time));
+  if (ev.location) parts.push(ev.location);
+
+  let recipientLine = "";
+  if (ev.visibility === "direct" && ev.author === me.email) {
+    recipientLine = " · for " + esc((ev.recipients || []).join(", "));
+  }
+
+  el.innerHTML =
+    "<h3>" + esc(ev.title) + pillFor(ev) +
+      (ev.date === todayKey() ? '<span class="pill today">Today</span>' : "") + "</h3>" +
+    (parts.length ? '<div class="when">' + esc(parts.join(" · ")) + "</div>" : "") +
+    (ev.notes ? '<div class="body">' + esc(ev.notes) + "</div>" : "") +
+    (ev.isObligation
+      ? '<div class="meta">Recurring reporting deadline — edit it in the Reporting Calendar.</div>'
+      : '<div class="meta">Added by ' + esc(ev.authorName || ev.author) + recipientLine + "</div>");
+
+  if (!ev.isObligation && ev.author === me.email) {
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "danger"; del.textContent = "Delete";
+    del.addEventListener("click", () => deleteEvent(ev));
+    actions.appendChild(del);
+    el.appendChild(actions);
+  }
+  return el;
+}
+
+// ----------------------------------------------------------- chrome --
+
+document.getElementById("prevBtn").addEventListener("click", () => {
+  cursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
+  render();
+});
+document.getElementById("nextBtn").addEventListener("click", () => {
+  cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  render();
+});
+document.getElementById("todayBtn").addEventListener("click", () => {
+  cursor = new Date();
+  picked = todayKey();
+  document.getElementById("evDate").value = picked;
+  view = "month";
+  render();
+});
+Array.from(document.querySelectorAll("#viewTabs button")).forEach(b => {
+  b.addEventListener("click", () => { view = b.getAttribute("data-view"); render(); });
+});
+</script>
+</body>
+</html>

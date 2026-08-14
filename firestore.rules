@@ -119,6 +119,53 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.author == emailKey();
     }
 
+    // Calendar dates. Same three-way visibility as notes above, and the
+    // same reasoning: this is the enforcement, the page only decides
+    // what to draw. A "just me" date cannot be fetched by anyone else
+    // however they ask, and there is deliberately no Admin/Director
+    // override, matching the choice made for Notes.
+    //
+    // Anyone with a profile may create a team-wide date -- that was a
+    // deliberate call rather than an oversight, on the grounds that the
+    // people using this are a dozen colleagues, not the public.
+    //
+    // Unlike notes there is no recipient-can-update carve-out: being put
+    // on someone's calendar doesn't let you edit their entry. Only the
+    // author can change or remove a date.
+    match /calendar_events/{eventId} {
+      allow read: if isSignedIn() && hasProfile() && (
+        resource.data.author == emailKey() ||
+        resource.data.visibility == 'team' ||
+        emailKey() in resource.data.recipients
+      );
+
+      // Create validates the shape, not just the author. The read rule
+      // above dereferences visibility and recipients directly, and rules
+      // deny outright when a field is missing -- so a document saved
+      // without them would make the "addressed to me" query fail for
+      // whoever was named in it, quietly breaking their calendar. The
+      // tool always writes both, but the tool isn't the only thing that
+      // can reach the database, so the guarantee belongs here.
+      allow create: if isSignedIn() && hasProfile() &&
+        request.resource.data.author == emailKey() &&
+        request.resource.data.visibility in ['private', 'team', 'direct'] &&
+        request.resource.data.recipients is list &&
+        request.resource.data.date is string;
+
+      // Author is pinned on both sides, so an event can't be reassigned
+      // to someone else's address -- which would otherwise plant it in
+      // their calendar and lock the original author out of their own
+      // entry.
+      allow update: if isSignedIn() && hasProfile() &&
+        resource.data.author == emailKey() &&
+        request.resource.data.author == emailKey() &&
+        request.resource.data.visibility in ['private', 'team', 'direct'] &&
+        request.resource.data.recipients is list;
+
+      allow delete: if isSignedIn() && hasProfile() &&
+        resource.data.author == emailKey();
+    }
+
     // The recurring reporting calendar (JDAI, surveys, year-end
     // close-out, and the ended-but-kept CCLC cycle). Everyone reads it;
     // Admin/Director change it, since it defines obligations for the
