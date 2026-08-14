@@ -138,6 +138,29 @@ def extract_plain_text(text: str) -> str:
     return WHITESPACE_RE.sub(" ", text).strip()[:SEARCH_TEXT_MAX_CHARS]
 
 
+def read_skills_from_launcher() -> list:
+    """Pulls the SKILLS list straight out of launcher.py so the mobile
+    site and the desktop app always offer the same set. Only entries
+    whose .skill file actually exists are included, so the site can't
+    advertise a download that 404s."""
+    source = (REPO_ROOT / "launcher.py").read_text(encoding="utf-8")
+    try:
+        start = source.index("SKILLS = [")
+        end = source.index("\n]", start) + 2
+    except ValueError:
+        return []
+    namespace: dict = {}
+    try:
+        exec(source[start:end], namespace)
+    except Exception:
+        return []
+    skills = []
+    for entry in namespace.get("SKILLS", []):
+        if (REPO_ROOT / "assets" / "skills" / entry.get("file", "")).is_file():
+            skills.append(entry)
+    return skills
+
+
 def build_guides_index() -> dict:
     docs = []
     home_file = None
@@ -216,6 +239,14 @@ def main() -> int:
         skills_out.mkdir(parents=True, exist_ok=True)
         for path in skills_src.glob("*.skill"):
             shutil.copy2(path, skills_out / path.name)
+
+    # The Skills list is defined once, in launcher.py, and read from
+    # there rather than duplicated here. Keeping a second copy in the
+    # web code is exactly how the desktop Skills page and the Guides
+    # page drifted apart once already.
+    (OUT_DIR / "skills.json").write_text(
+        json.dumps(read_skills_from_launcher(), indent=2), encoding="utf-8"
+    )
 
     index = build_guides_index()
     (OUT_DIR / "guides-index.json").write_text(json.dumps(index, indent=2), encoding="utf-8")

@@ -49,10 +49,12 @@
     els.contentFrame = document.getElementById("content-frame");
     els.loading = document.getElementById("loading");
     els.emptyState = document.getElementById("empty-state");
+    els.skillsView = document.getElementById("skills-view");
     els.settingsView = document.getElementById("settings-view");
     els.teamView = document.getElementById("team-view");
     els.topbarTitle = document.getElementById("topbar-title");
     els.footerUserName = document.getElementById("footer-user-name");
+    els.skillsNavBtn = document.getElementById("skills-nav-btn");
     els.settingsNavBtn = document.getElementById("settings-nav-btn");
     els.teamNavBtn = document.getElementById("team-nav-btn");
 
@@ -63,6 +65,7 @@
 
     els.loginForm.addEventListener("submit", handleLoginSubmit);
     els.loginForgot.addEventListener("click", handleForgotPassword);
+    els.skillsNavBtn.addEventListener("click", function () { toggleSidebar(false); showSkills(); });
     els.settingsNavBtn.addEventListener("click", function () { toggleSidebar(false); showSettings(); });
     els.teamNavBtn.addEventListener("click", function () { toggleSidebar(false); showTeam(); });
 
@@ -295,10 +298,11 @@
   }
 
   function showPanel(which) {
-    // which is "loading" | "empty" | "frame" | "settings" | "team"
+    // which is "loading" | "empty" | "frame" | "skills" | "settings" | "team"
     els.loading.style.display = which === "loading" ? "block" : "none";
     els.emptyState.style.display = which === "empty" ? "block" : "none";
     els.contentFrame.style.display = which === "frame" ? "block" : "none";
+    els.skillsView.style.display = which === "skills" ? "block" : "none";
     els.settingsView.style.display = which === "settings" ? "block" : "none";
     els.teamView.style.display = which === "team" ? "block" : "none";
   }
@@ -381,6 +385,89 @@
         a.setAttribute("rel", "noopener");
       }
     });
+  }
+
+  // ----------------------------------------------------------- skills --
+
+  /* Claude Skills, offered as downloadable .skill files. The list comes
+   * from skills.json, which the build generates from the same SKILLS
+   * list the desktop app uses (see scripts/build_site.py) -- so the two
+   * can't drift, which they did once when the web side had its own
+   * copy. */
+  function showSkills() {
+    state.view = "skills";
+    els.topbarTitle.textContent = "Skills";
+    renderNav(els.searchInput.value);
+    showPanel("skills");
+    renderSkillsView();
+  }
+
+  function renderSkillsView() {
+    els.skillsView.innerHTML = "";
+
+    var intro = section("Skills");
+    var blurb = document.createElement("p");
+    blurb.className = "login-help";
+    blurb.style.margin = "0";
+    blurb.textContent =
+      "Things Claude already knows how to do for this office. Download one, " +
+      "then add it to your own Claude \u2014 after that just ask in plain English.";
+    intro.appendChild(blurb);
+    els.skillsView.appendChild(intro);
+
+    fetch("./skills.json", { cache: "no-cache" })
+      .then(function (r) { return r.json(); })
+      .then(function (skills) {
+        if (!skills || !skills.length) {
+          var none = section("");
+          none.appendChild(labelSpan("No skills available yet."));
+          els.skillsView.appendChild(none);
+          return;
+        }
+        skills.forEach(function (skill) {
+          var card = section(skill.name);
+
+          var desc = document.createElement("p");
+          desc.style.margin = "0 0 12px";
+          desc.style.fontSize = "calc(14px * var(--font-scale))";
+          desc.textContent = skill.description || "";
+          card.appendChild(desc);
+
+          if (skill.prompts && skill.prompts.length) {
+            var tryLabel = document.createElement("p");
+            tryLabel.className = "login-help";
+            tryLabel.style.margin = "0 0 4px";
+            tryLabel.textContent = "Try asking:";
+            card.appendChild(tryLabel);
+
+            var list = document.createElement("ul");
+            list.className = "team-list";
+            skill.prompts.forEach(function (prompt) {
+              var li = document.createElement("li");
+              li.textContent = "\u201c" + prompt + "\u201d";
+              list.appendChild(li);
+            });
+            card.appendChild(list);
+          }
+
+          var link = document.createElement("a");
+          link.className = "btn btn-primary";
+          link.style.display = "inline-block";
+          link.style.textDecoration = "none";
+          link.style.marginTop = "12px";
+          link.href = "./assets/skills/" + skill.file;
+          link.setAttribute("download", "");
+          link.textContent = "Download Skill";
+          card.appendChild(link);
+
+          els.skillsView.appendChild(card);
+        });
+      })
+      .catch(function (err) {
+        var failed = section("");
+        failed.appendChild(labelSpan("Couldn't load the skills list: " + (err && err.message)));
+        els.skillsView.appendChild(failed);
+      });
   }
 
   // --------------------------------------------------------- settings --
