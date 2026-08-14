@@ -527,6 +527,22 @@ SIDEBAR_HIDDEN_FILES = {"01_welcome.html"}
 # under assets/skills/ (see _show_skills / _download_skill_file).
 SKILLS = [
     {
+        "name": "Center Context",
+        "description": (
+            "Gives Claude the background it would otherwise ask for every time — "
+            "our sites and programs, who does what, what JDAI and ASC mean, which "
+            "grants are active, and how this app works. Install it once and stop "
+            "explaining. Anyone can keep it current: tell Claude what changed."
+        ),
+        "prompts": [
+            "What's due for JDAI this month?",
+            "Who should I ask about a payroll question?",
+            "What does ASC/SERVE mean?",
+            "Update the Center context skill — Isaiah moved to the Busco site.",
+        ],
+        "file": "center-context.skill",
+    },
+    {
         "name": "Deposit Reconciliation",
         "description": "Pulls all deposits and compares them side by side to catch any mismatches.",
         "prompts": [
