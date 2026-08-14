@@ -59,10 +59,26 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // Cache-first for the app shell itself (rarely changes).
+  // Network-first for the app shell too, falling back to cache when
+  // offline.
+  //
+  // This was cache-first, on the reasoning that the shell rarely
+  // changes. In practice that meant a deployed change could stay
+  // invisible indefinitely: the browser kept serving its cached
+  // index.html and app.js and never asked the server, so a new page
+  // that was demonstrably live on the site simply never appeared. A
+  // whole afternoon went into chasing that.
+  //
+  // The shell is a few small files, so fetching them costs very little,
+  // and offline still works because anything already cached is served
+  // when the network fails. Correctness over a marginal speed gain.
   event.respondWith(
-    caches.match(req).then(function (cached) {
-      return cached || fetch(req);
-    })
+    fetch(req)
+      .then(function (res) {
+        var copy = res.clone();
+        caches.open(CACHE_NAME).then(function (cache) { cache.put(req, copy); });
+        return res;
+      })
+      .catch(function () { return caches.match(req); })
   );
 });

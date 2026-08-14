@@ -70,9 +70,19 @@
     els.teamNavBtn.addEventListener("click", function () { toggleSidebar(false); showTeam(); });
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./sw.js").catch(function () {
-        /* offline install just won't work this session -- not fatal */
-      });
+      // updateViaCache "none" makes the browser re-fetch sw.js itself
+      // rather than potentially serving it from its own HTTP cache, so
+      // a new deploy is actually noticed. Combined with the explicit
+      // update() below, a change reaches people on their next visit
+      // instead of whenever the browser feels like checking.
+      navigator.serviceWorker
+        .register("./sw.js", { updateViaCache: "none" })
+        .then(function (registration) {
+          registration.update();
+        })
+        .catch(function () {
+          /* offline install just won't work this session -- not fatal */
+        });
     }
 
     if (window.CenterAuth) {
