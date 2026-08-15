@@ -43,6 +43,37 @@
   var current = null; // { user, profile } or null when signed out
   var profileUnsub = null;
 
+  /* Removes the junk top-level fields the old dotted-key write left
+   * behind ("preferences.theme" and friends). They're inert -- nothing
+   * reads them -- but they sit in the profile looking like real
+   * settings and would confuse anyone reading the document later.
+   *
+   * Best-effort and deliberately silent: only Admins/Directors ever got
+   * one written, and they're the only accounts firestore.rules lets
+   * remove it, so a refusal here just means there was nothing to clean.
+   */
+  function cleanUpDottedKeys(key) {
+    try {
+      db.collection("users").doc(key).get().then(function (snap) {
+        if (!snap.exists) return;
+        var stale = Object.keys(snap.data() || {}).filter(function (k) {
+          return k.indexOf("preferences.") === 0;
+        });
+        if (!stale.length) return;
+        // FieldPath keeps each dotted name as one literal segment rather
+        // than re-interpreting it as a path, which is what created them.
+        var args = [];
+        stale.forEach(function (k) {
+          args.push(new firebase.firestore.FieldPath(k));
+          args.push(firebase.firestore.FieldValue.delete());
+        });
+        db.collection("users").doc(key).update.apply(
+          db.collection("users").doc(key), args
+        ).catch(function () { /* nothing to clean, or not permitted */ });
+      }).catch(function () {});
+    } catch (e) { /* never let tidying break saving a preference */ }
+  }
+
   function emailKey(email) {
     return String(email || "").trim().toLowerCase();
   }
@@ -124,7 +155,7 @@
     },
 
     /** Lets the signed-in person change their own password from inside
-     * the app (Settings -> Security), instead of only via the "Forgot
+     * the app (Settings -> Password), instead of only via the "Forgot
      * password?" email link on the sign-in screen. Firebase requires a
      * fresh sign-in before a security-sensitive change like this, so it
      * re-checks the current password first (reauthenticateWithCredential)
@@ -147,22 +178,31 @@
     updatePreferences: function (partial) {
       if (!current || !current.user) return Promise.reject(new Error("Not signed in"));
       var key = emailKey(current.user.email);
-      var next = {};
+
+      // A real nested object, NOT { "preferences.theme": value }.
+      //
+      // set() treats a dotted string as a literal field name; only
+      // update() reads it as a path. Writing "preferences.theme" that
+      // way therefore created a junk top-level field of that exact name
+      // and left the real preferences map untouched -- so the theme and
+      // text-size pickers appeared to do nothing.
+      //
+      // It only ever failed for Admins and Directors, which is why it
+      // survived: firestore.rules lets them write any field, so the bad
+      // write succeeded and the setting silently didn't apply. For
+      // everyone else the same write was refused (affectedKeys was
+      // "preferences.theme", not "preferences"), and a fallback below
+      // quietly did the right thing -- so staff saw working pickers and
+      // directors didn't.
+      var nested = {};
       Object.keys(partial || {}).forEach(function (k) {
-        if (PERSONAL_SETTING_KEYS.indexOf(k) !== -1) next["preferences." + k] = partial[k];
+        if (PERSONAL_SETTING_KEYS.indexOf(k) !== -1) nested[k] = partial[k];
       });
-      if (Object.keys(next).length === 0) return Promise.resolve();
-      return db.collection("users").doc(key).set(
-        Object.fromEntries(Object.entries(next).map(function (pair) { return pair; })),
-        { merge: true }
-      ).catch(function () {
-        // Fallback for older browsers without Object.fromEntries.
-        var nested = { preferences: {} };
-        Object.keys(partial).forEach(function (k) {
-          if (PERSONAL_SETTING_KEYS.indexOf(k) !== -1) nested.preferences[k] = partial[k];
-        });
-        return db.collection("users").doc(key).set(nested, { merge: true });
-      });
+      if (Object.keys(nested).length === 0) return Promise.resolve();
+
+      return db.collection("users").doc(key)
+        .set({ preferences: nested }, { merge: true })
+        .then(function () { cleanUpDottedKeys(key); });
     },
 
     /** Admin/Director only (also enforced server-side by
