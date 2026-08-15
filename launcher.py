@@ -544,6 +544,20 @@ SKILLS = [
         "file": "center-context.skill",
     },
     {
+        "name": "Apricot Birthdays",
+        "description": (
+            "Turns an Apricot birthday or roster export into a file the Calendar's "
+            "bulk upload accepts, so a year of birthdays goes in once instead of "
+            "being typed one at a time. Hand Claude the PDF and it does the rest."
+        ),
+        "prompts": [
+            "Format these birthdays for the calendar upload.",
+            "Here's the Apricot birthday export — turn it into the upload template.",
+            "Mass-upload these birthdays to the Office App calendar.",
+        ],
+        "file": "apricot-birthdays.skill",
+    },
+    {
         "name": "Deposit Reconciliation",
         "description": "Pulls all deposits and compares them side by side to catch any mismatches.",
         "prompts": [
