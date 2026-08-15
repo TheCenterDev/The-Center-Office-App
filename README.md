@@ -58,8 +58,10 @@ push to `main`; the next release will include the changes automatically.
 
 The Mac app stores its data in `~/Library/Application Support/The Center
 Office App/` — the standard place Mac apps put this sort of thing. That
-folder holds `html/`, `assets/`, `users.json`, `settings.json`,
-`shared_preferences.json`, and `error_log.txt`.
+folder holds `html/`, `assets/`, `settings.json`, and
+`error_log.txt`. (Earlier versions also kept `users.json` and
+`shared_preferences.json` here; accounts and preferences both live in
+Firebase now, so those files are no longer created or read.)
 
 To open it in Finder: **Go** menu → **Go to Folder…** → paste
 `~/Library/Application Support/The Center Office App`.
@@ -122,17 +124,25 @@ dependency — it just falls back to the browser.
 
 ## Adding or updating documents
 
-No code changes needed:
+Edit the `html/` folder **in this repository**, then push. That single
+change reaches the desktop app and the mobile site together.
 
-1. Drop an `.html` file into the `html/` folder.
+1. Add or edit an `.html` file in `html/`.
 2. Optional: prefix the filename with a number to control its order in the
    list, e.g. `01_Welcome.html`, `02_FAQ.html`. The number is stripped from
    the on-screen name.
 3. Optional: set `<title>Your Title</title>` in the file's `<head>` — the
    launcher shows that instead of the filename.
-4. Click **Refresh** in the app (or restart it) to see the change.
+4. Push to `main`. The mobile site rebuilds automatically; the desktop app
+   picks the change up next time `scripts/update_app.command` is run.
 
-To remove a document, delete its file from `html/`.
+To remove a document, delete its file from `html/` and push.
+
+**Don't edit the installed copy by hand.** A packaged Mac app reads
+`~/Library/Application Support/The Center Office App/html/`, and editing
+a file there changes that one machine only — every other computer and the
+phone site stay on the old text. That is exactly how the two drifted
+apart once already. The repo is the source of truth.
 
 ## Mobile / web access
 
@@ -304,12 +314,20 @@ just never commit it. Generate a fresh one from the console any time.
 
 ## Shared data in the interactive tools
 
-Two of the interactive tools now save to the same Firebase project as
-login, instead of each device's own browser storage:
+The interactive tools save to the same Firebase project as login,
+instead of each device's own browser storage:
 
-- **Building Maintenance Log** → `maintenance_log` collection
-- **New Hire Onboarding Tracker** → `onboarding_hires` collection (each
-  hire's progress) and `onboarding_template` (the checklist itself)
+- **Building Maintenance Log** → `maintenance_log`
+- **New Hire Onboarding Tracker** → `onboarding_hires` (each hire's
+  progress) and `onboarding_template` (the checklist itself)
+- **Calendar** → `calendar_events`
+- **Notes** → `notes`
+- **Count Log** → `count_log`
+- **Reporting Calendar** → `reporting_calendar`
+
+**Program Timer** is the exception and deliberately so: no sign-in, no
+database, nothing saved beyond the station list in that browser. It has
+to work in a room with no internet.
 
 ### Editing the onboarding checklist
 
@@ -340,7 +358,8 @@ still tick boxes and add per-hire "Additional Items", which apply to
 that one person only.
 
 Any signed-in person with a profile can read, add, edit, or delete in
-either one — same flat permissions the old single-device versions had,
+the maintenance log and the onboarding tracker — the same flat
+permissions the old single-device versions had,
 just shared live across everyone now instead of stuck on one browser.
 See `firestore.rules` for the exact rule (unchanged from the login
 rules otherwise; just two new collections added at the bottom).
@@ -393,15 +412,14 @@ though usage would stay within the free allowance. Since staying
 entirely card-free was the point, photos are left out for now; email
 one separately if a maintenance issue needs one.
 
-**Desktop has a second login now.** These two tools open in their own
-pywebview window with no connection to the desktop app's own
-`users.json` login — they're plain webpages that happen to run inside
-the launcher, so they get their own small Firebase sign-in screen, same
-account as the mobile site. That means on desktop, staff now sign in
-twice with two different credential sets: once into the launcher itself
-(`users.json`), and again the first time they open one of these two
-tools (Firebase). Not ideal, but unifying those is a bigger project for
-another day — flagging it here so it isn't a surprise.
+**One sign-in on the desktop, too.** These tools open in their own
+pywebview window, and for a while that meant signing in twice: once into
+the launcher and again into each tool. The launcher now hands its
+session to the tool it opens, passed through the process environment and
+into the page as a URL fragment (fragments are never sent to a server),
+so a tool opened from the launcher is already signed in as you. Opened
+directly in a browser, the same page still shows its own sign-in. See
+`html/center-session.js`.
 
 ## Adding or replacing the logo
 

@@ -682,7 +682,9 @@
     ));
     els.settingsView.appendChild(appearance);
 
-    var security = section("Security");
+    // Named "Password" to match the launcher and the FAQ, which both
+    // tell people to look for Settings -> Password.
+    var security = section("Password");
     var currentPwInput = document.createElement("input");
     currentPwInput.type = "password";
     currentPwInput.placeholder = "Current password";

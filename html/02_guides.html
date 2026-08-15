@@ -20,24 +20,24 @@
   <h2>Apps</h2>
 
   <h3>Credit Card Reconciliation</h3>
-  <p>Download the Expensify report and the Credit Union deposit PDF, then open the tool and follow the on-screen steps. It compares the two reports and matches them up for you automatically. From there, you're ready to finish the rest of the reconciliation.</p>
+  <p>Download the Expensify report and the Capital One statement PDF, then open the tool and follow the on-screen steps. It compares the two reports and matches them up for you automatically. From there, you're ready to finish the rest of the reconciliation.</p>
 
   <h3>Whitley County Resource Directory</h3>
   <p>A searchable, filterable directory of local resources for families and staff — childcare, housing, counseling, food assistance, financial help, education/career, and emergency services — pulled from the Whitley County Resource Guide. Faster than flipping through the PDF mid-conversation.</p>
 
   <h3>New Hire Onboarding Tracker</h3>
-  <p>A checklist for onboarding a new hire, grounded in the Employee Handbook — accounts and access, benefits and pay, policies, and orientation. Tracks progress per hire and can email a progress update straight to the directors with one click. Everyone sees the same hires and the same ticked boxes, on any device.</p>
+  <p>A checklist for onboarding a new hire, grounded in the Employee Handbook — accounts and access, benefits and pay, policies, and orientation. Tracks progress per hire and opens a pre-filled email of the progress to the directors with one click, ready for you to send. Everyone sees the same hires and the same ticked boxes, on any device.</p>
   <p>Admins and Directors can change the checklist itself with <strong>Edit Checklist</strong>: add, rename, or remove sections and items. Changes apply to every hire, current and future. Rewording an item keeps whoever had already ticked it ticked. You can also add items that apply to one hire only, under Additional Items.</p>
 
   <h3>Building Maintenance Log</h3>
   <p>Log a facility issue with location, priority, and a description, then track it through Open → In Progress → Done. Everyone signed in sees the same list, so a request logged on a phone at Busco shows up on the office computer. Export to CSV any time for a board update or contractor conversation.</p>
-  <p>Each new request also becomes a task in the Todoist <strong>Facilities</strong> project automatically, usually within about five minutes. Urgent items arrive as priority 1.</p>
+  <p>Each new request also becomes a task in the Todoist <strong>Facilities</strong> project automatically, usually within five or ten minutes. Urgent items arrive as priority 1.</p>
   <p>It works in both directions. Tick the task off in Todoist and the entry here moves to <strong>Done</strong> with the date it was completed. Mark it Done here and the Todoist task closes. If someone <em>deletes</em> a Todoist task rather than completing it, the request deliberately stays open and says so in red — deleting usually means it shouldn't have been posted, not that the work is finished, and quietly closing a real repair on that basis would lose it.</p>
 
   <h3>Calendar</h3>
   <p>Dates for yourself, for specific people, or for the whole team, in a month grid you can click through. Set how far ahead you want warning — on the day, three days, a week — and when that point arrives, the date appears as a reminder across the top of the app and the mobile site until you dismiss it.</p>
   <p>Email addresses, phone numbers and web links typed into a date's notes become clickable, so you can go straight from the calendar to the message or the meeting. To add a lot of dates at once, open <strong>Upload a lot of dates at once</strong>, take a copy of the linked Google Sheets template, fill it in, and download it as CSV — the tool shows you a preview and flags any bad rows before anything is saved. A PDF works too, but it has to be reconstructed from the page, so check the preview carefully.</p>
-  <p>Who sees a date works the same way as Notes: "just me" is hidden from everyone including Directors, "the whole team" is visible to everyone signed in, and "specific people" is visible only to whoever you name. The recurring reporting deadlines below also appear on the grid, marked in amber, so what's coming up is answerable in one place — but they're still edited in the Reporting Calendar.</p>
+  <p>Who sees a date works the same way as Notes: "just me" is hidden from everyone including Directors, "the whole team" is visible to everyone signed in, and "specific people" is visible only to whoever you name. Reporting deadlines that fall on a set day also appear on the grid in amber, so what's coming up is answerable in one place. The ones that are only due “sometime that month” are listed under the grid instead, since putting them on a particular day would be inventing a date. They're all still edited in the Reporting Calendar.</p>
 
   <h3>Reporting Calendar</h3>
   <p>Every recurring reporting obligation in one place — the monthly JDAI report, survey windows, year-end close-out — with what's coming up in the next 60 days and a full year view. Deadlines turn into Todoist tasks about ten days ahead, so nothing depends on someone remembering.</p>
@@ -52,7 +52,7 @@
   <p>Totals add themselves up by category and site over any date range, and export to CSV. This is where the snack and meal numbers reported to Parkview come from, so they're counted rather than estimated.</p>
 
   <h3>Program Timer</h3>
-  <p>A big countdown for activity blocks, with presets for homework help, activity, snack and clean-up. Build a station rotation and it chimes and moves to the next station on its own. No sign-in, nothing saved, and it works without internet — prop a phone on a shelf and let it run the room.</p>
+  <p>A big countdown for activity blocks, with presets for homework help, activity, snack, clean-up, free time and a two-minute warning. Build a station rotation and it chimes and moves to the next station on its own. No sign-in and no internet needed — prop a phone on a shelf and let it run the room. The station rotation is remembered on that device, so a room's usual set-up is still there tomorrow, but nothing is sent anywhere or shared.</p>
 
   <h2>Skills</h2>
   <p>Skills are things Claude already knows how to do for this office — just tell Claude what you need in plain language, no app to open. To use one outside this launcher (in your own Claude or Cowork chat), download it below and attach the file to a conversation. Once it's attached, type <code>/</code> followed by the skill's name (for example, <code>/deposit-reconciliation</code>) to run it directly — or just describe what you need and Claude will use it on its own when it fits.</p>
@@ -66,6 +66,16 @@
     <li>"Who should I ask about a payroll question?"</li>
     <li>"How do I push a change to the app?"</li>
     <li>"What does ASC/SERVE mean?"</li>
+  </ul>
+
+  <h3>Apricot Birthdays</h3>
+  <p>Hand Claude a birthday or roster export out of Apricot and it turns it into a file the Calendar's bulk upload accepts, so a year of birthdays goes in once instead of being typed in one at a time. It reads the usual Apricot PDF layouts, fills in the Calendar Bulk Upload Template's columns, and tells you about any row it couldn't read rather than quietly dropping it. Check the Calendar's preview before importing. <a class="download" href="../assets/skills/apricot-birthdays.skill" download>Download Skill</a></p>
+  <p><em>Try asking:</em></p>
+  <ul class="prompts">
+    <li><code>/apricot-birthdays</code></li>
+    <li>"Format these birthdays for the calendar upload."</li>
+    <li>"Here's the Apricot birthday export — turn it into the upload template."</li>
+    <li>"Mass-upload these birthdays to the Office App calendar."</li>
   </ul>
 
   <h3>Deposit Reconciliation</h3>

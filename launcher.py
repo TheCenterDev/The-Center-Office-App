@@ -1861,7 +1861,6 @@ class LauncherApp:
                                 # and never touched by View As -- used only to
                                 # decide whether the View As control itself shows
         self.current_user = None  # the matched users.json record, or None if
-                                   # logged in via one of the emergency shared logins
 
         self.settings = load_settings()
         # Set at sign-in: the Firebase tokens authorising every read and
@@ -2233,9 +2232,20 @@ class LauncherApp:
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _dismiss_reminders(self, bar):
+        """Hides the strip and remembers that, so it doesn't reappear on
+        the next launch the same day. The mobile site already behaved
+        this way; the desktop app didn't, which made the documented
+        behaviour true in one place and not the other."""
+        bar.pack_forget()
+        self.settings["reminders_dismissed_on"] = datetime.date.today().isoformat()
+        save_settings(self.settings)
+
     def _show_reminders(self, due):
         bar = getattr(self, "reminder_bar", None)
         if bar is None or not bar.winfo_exists():
+            return
+        if self.settings.get("reminders_dismissed_on") == datetime.date.today().isoformat():
             return
         for widget in bar.winfo_children():
             widget.destroy()
@@ -2276,7 +2286,7 @@ class LauncherApp:
             hover_color=ACCENT_SOFT,
             text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=F(14)),
-            command=lambda: bar.pack_forget(),
+            command=lambda: self._dismiss_reminders(bar),
         )
         dismiss.place(relx=1.0, x=-10, y=8, anchor="ne")
 
@@ -3912,7 +3922,7 @@ class LauncherApp:
 
     def _show_settings(self):
         """Personal display preferences. If you're logged in as a real
-        person (not one of the emergency shared logins), these are saved
+        person, these are saved
         to your own account in users.json, so they follow you to any
         computer running this app instead of staying behind on this one
         — see PERSONAL_SETTING_KEYS and attempt_login. Emergency shared
@@ -4030,14 +4040,14 @@ class LauncherApp:
             # just Admin/Director. Previously the only way to change a
             # password was Admin/Director doing it for you from the Team
             # page; this lets anyone handle their own. Deliberately not
-            # shown for the emergency shared Staff/Admin/Director logins
             # (self.current_user is None for those) — those shared
             # passwords are only touched via "Reset to Defaults" or by
             # editing settings.json directly.
             section(
                 "Password",
-                "Change your own sign-in password. This is separate from the "
-                "shared Staff/Admin/Director logins.",
+                "Change your own sign-in password. The new one works "
+                "everywhere immediately -- this app, the phone site, and "
+                "every tool inside them.",
             )
             pw_card = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=14, border_width=1, border_color=BORDER)
             pw_card.pack(fill="x", pady=(6, 0))
