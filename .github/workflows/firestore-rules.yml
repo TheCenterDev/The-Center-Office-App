@@ -40,7 +40,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install the Firebase CLI
         run: npm install -g firebase-tools --no-audit --no-fund
@@ -60,10 +60,53 @@ jobs:
           python3 -c "import json,os; json.load(open(os.environ['RUNNER_TEMP'] + '/service-account.json'))" \
             || { echo "The secret isn't valid JSON."; exit 1; }
 
+      # Prints who the key is and whether it can see the project at all,
+      # before attempting anything. "exit code 1" on its own says
+      # nothing; this distinguishes a missing IAM role from a wrong
+      # project id from a malformed key, which need different fixes.
+      - name: Check the credential can reach the project
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
+        run: |
+          echo "firebase-tools: $(firebase --version)"
+          # client_email and project_id identify the key; neither is
+          # secret. The private key itself is never printed.
+          python3 - <<'EOF'
+          import json, os
+          key = json.load(open(os.environ["RUNNER_TEMP"] + "/service-account.json"))
+          print("service account:", key.get("client_email", "MISSING"))
+          print("key's project_id:", key.get("project_id", "MISSING"))
+          print("key type:", key.get("type", "MISSING"))
+          EOF
+          echo "--- can it list projects? ---"
+          firebase projects:list --non-interactive ||             echo "NOTE: listing projects failed. That usually means the service account has no Viewer role on the project."
+
       - name: Publish
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
-        run: firebase deploy --only firestore:rules --project the-center-office-app --non-interactive
+        run: |
+          set -o pipefail
+          firebase deploy --only firestore:rules \
+            --project the-center-office-app --non-interactive --debug 2>&1 | tee deploy.log || {
+              echo
+              echo "=============================================="
+              echo "Deploy failed. What the error usually means:"
+              echo
+              if grep -qi "permission\|403\|PERMISSION_DENIED\|insufficient" deploy.log; then
+                echo "  -> The service account can't publish rules."
+                echo "     Google Cloud console -> IAM -> find the account printed"
+                echo "     above -> Edit -> Add role -> 'Firebase Rules Admin'."
+              elif grep -qi "Failed to get Firebase project\|not found\|does not exist" deploy.log; then
+                echo "  -> It can't see the project at all."
+                echo "     Add the 'Viewer' role as well as 'Firebase Rules Admin'."
+              elif grep -qi "compil\|syntax\|Unexpected" deploy.log; then
+                echo "  -> firestore.rules doesn't compile. The line number is above."
+              else
+                echo "  -> Unrecognised failure; the full --debug output is above."
+              fi
+              echo "=============================================="
+              exit 1
+            }
 
       - name: Remove the key
         if: always()
