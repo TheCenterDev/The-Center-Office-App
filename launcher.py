@@ -341,7 +341,28 @@ try:
             return
 
         self._auto_hide_at_top = start_f <= 0.001
-        self._scrollbar_auto_hide_reveal()
+
+        # Reveal only when the view has actually MOVED, not on every
+        # set() call.
+        #
+        # set() fires on any re-layout, not just on scrolling -- and
+        # hiding the scrollbar is itself a re-layout: the column it
+        # occupied disappears, the content area gets wider, text rewraps,
+        # and Tk calls set() again. Revealing unconditionally there meant
+        # concealing instantly un-concealed, then the 900ms timer hid it
+        # again, forever. That is the once-a-second flicker, and it took
+        # the surrounding widgets with it because the width change
+        # rewrapped every text block on the page.
+        #
+        # Comparing the start fraction distinguishes the two cases: real
+        # scrolling changes where you are, a re-layout doesn't. Sitting
+        # at the top, start stays 0.0 through any number of re-layouts,
+        # so the loop can't start.
+        previous_start = getattr(self, "_auto_hide_last_start", None)
+        self._auto_hide_last_start = start_f
+        if previous_start is None or abs(start_f - previous_start) > 0.0005:
+            self._scrollbar_auto_hide_reveal()
+
         if self._auto_hide_at_top and not self._auto_hide_hovering:
             self._scrollbar_auto_hide_schedule()
 
@@ -4457,10 +4478,19 @@ class LauncherApp:
         widget.pack(fill="x", anchor="w")
 
         def resize(event=None):
+            # Bound to <Configure> and then changes the widget's height,
+            # which raises <Configure> again -- so this re-enters unless
+            # it stops itself. Writing the same height back still counts
+            # as a change to Tk on Windows, which turned every reflow
+            # into a burst of redraws and made the text blocks visibly
+            # jitter. Only touch the widget when the answer differs.
             try:
                 counted = widget.count("1.0", "end", "displaylines")
-                lines = counted[0] if counted else 1
-                widget.configure(height=max(1, lines))
+                lines = max(1, counted[0] if counted else 1)
+                if getattr(widget, "_last_line_count", None) == lines:
+                    return
+                widget._last_line_count = lines
+                widget.configure(height=lines)
             except Exception:
                 pass
 
