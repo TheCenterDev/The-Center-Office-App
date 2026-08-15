@@ -1,0 +1,70 @@
+name: Publish Firestore rules
+
+# Publishes firestore.rules to the live database whenever it changes on
+# main, so the file in this repo and the rules actually enforcing
+# permissions can't drift apart.
+#
+# They drifted repeatedly before this existed: the file said "paste this
+# into the Firebase console", which meant every new collection shipped
+# with its tool but without its permissions, and the tool answered
+# "Missing or insufficient permissions" until someone remembered. The
+# rules are the security model -- they shouldn't depend on remembering.
+#
+# Uses the FIREBASE_SERVICE_ACCOUNT secret that already exists for the
+# Todoist sync. If the deploy fails with a permissions error, that
+# service account needs the "Firebase Rules Admin" role: Google Cloud
+# console -> IAM -> find the service account -> Edit -> Add role. The
+# console paste still works as a fallback, and firestore.rules in this
+# repo remains the source of truth either way.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firestore.rules"
+      - "firebase.json"
+      - ".github/workflows/firestore-rules.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: firestore-rules
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install the Firebase CLI
+        run: npm install -g firebase-tools --no-audit --no-fund
+
+      - name: Write the service account key to a file
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "FIREBASE_SERVICE_ACCOUNT secret is not set."
+            exit 1
+          fi
+          # Written to the runner's own temp dir, which is destroyed with
+          # the run. Never echoed, and never inside the checkout, so it
+          # cannot be committed by accident.
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
+          python3 -c "import json,os; json.load(open(os.environ['RUNNER_TEMP'] + '/service-account.json'))" \
+            || { echo "The secret isn't valid JSON."; exit 1; }
+
+      - name: Publish
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
+        run: firebase deploy --only firestore:rules --project the-center-office-app --non-interactive
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/service-account.json"

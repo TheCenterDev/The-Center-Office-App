@@ -1,11 +1,17 @@
 rules_version = '2';
 
-// Security rules for the mobile site's Firestore database (see
-// web/auth.js). This file is NOT deployed automatically -- there's no
-// Firebase CLI step in this repo's build. Paste this into the Firebase
-// console once: Build -> Firestore Database -> Rules tab -> replace
-// the contents -> Publish. Update it here too if you ever change it in
-// the console, so this file stays the source of truth.
+// Security rules for the Firestore database behind both the desktop app
+// and the mobile site (see web/auth.js and html/center-session.js).
+//
+// This file IS the live rule set: pushing a change to it on main
+// publishes it, via .github/workflows/firestore-rules.yml. Editing the
+// rules in the Firebase console instead will work until the next push
+// to this file, which will overwrite it -- so change it here.
+//
+// It used to say "paste this into the console", and the result was that
+// new collections shipped with their tool but without their
+// permissions, and the tool answered "Missing or insufficient
+// permissions" until somebody remembered the second step.
 //
 // Model: one document per person in the "users" collection, keyed by
 // their lowercased email (matching the desktop app's users.json). A

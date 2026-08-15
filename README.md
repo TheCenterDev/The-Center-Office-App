@@ -421,6 +421,30 @@ so a tool opened from the launcher is already signed in as you. Opened
 directly in a browser, the same page still shows its own sign-in. See
 `html/center-session.js`.
 
+## Firestore security rules
+
+`firestore.rules` is the live rule set, not a copy of it. Pushing a
+change to that file on `main` publishes it to the database, via
+`.github/workflows/firestore-rules.yml`.
+
+It used to say "paste this into the Firebase console", and the
+predictable happened: a new tool would ship with its collection but
+without its permissions, and the tool would answer *"Missing or
+insufficient permissions"* until someone remembered the second step. The
+security model shouldn't depend on remembering.
+
+- Changing the rules in the console still works, but the next push that
+  touches `firestore.rules` overwrites it. Change the file.
+- The workflow reuses the `FIREBASE_SERVICE_ACCOUNT` secret the Todoist
+  sync already uses. The key is written to the runner's temp directory,
+  never echoed, never inside the checkout, and deleted afterwards.
+- **If the deploy fails with a permissions error**, that service account
+  needs the **Firebase Rules Admin** role: Google Cloud console → IAM →
+  find the service account → Edit → Add role. The Admin SDK key doesn't
+  always come with it.
+- To publish without changing anything: Actions → **Publish Firestore
+  rules** → Run workflow.
+
 ## Adding or replacing the logo
 
 The sidebar header and welcome screen show the real Center logo from
