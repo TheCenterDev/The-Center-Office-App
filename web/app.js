@@ -237,30 +237,48 @@
       });
     }
 
+    // Skills is a page of its own, listed with the guides and tools
+    // rather than sitting in the footer next to Settings and Team. The
+    // footer reads as "utility buttons", so a page with actual content
+    // in it was effectively invisible there.
+    //
+    // It sits at the boundary between the reading material (Guides, FAQ,
+    // Contacts) and the things you actually open (the tools, marked
+    // APP), because that's what it is: something to read about and take
+    // away, not an app. The boundary is found rather than hardcoded to
+    // a position, so adding a guide or a tool can't push it out of
+    // place.
+    var showSkillsItem = !q || "skills".indexOf(q) === 0 || q.indexOf("skill") !== -1;
+
+    function makeSkillsButton() {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "nav-item" + (state.view === "skills" ? " active" : "");
+      btn.setAttribute("role", "listitem");
+      var label = document.createElement("span");
+      label.textContent = "Skills";
+      btn.appendChild(label);
+      btn.addEventListener("click", function () {
+        toggleSidebar(false);
+        showSkills();
+      });
+      return btn;
+    }
+
+    var skillsPlaced = false;
     docs.forEach(function (d) {
+      if (showSkillsItem && !skillsPlaced && d.isProgram) {
+        els.navList.appendChild(makeSkillsButton());
+        skillsPlaced = true;
+      }
       var btn = makeNavButton(d.title, d.file, d.isProgram, state.view === "doc" && state.activeFile === d.file);
       els.navList.appendChild(btn);
     });
 
-    // Skills is a page of its own, listed with the guides and tools
-    // rather than sitting in the footer next to Settings and Team. The
-    // footer reads as "utility buttons", so a page with actual content
-    // in it was effectively invisible there -- it belongs in the list
-    // you scan, in the same position the desktop launcher puts it.
-    var showSkillsItem = !q || "skills".indexOf(q) === 0 || q.indexOf("skill") !== -1;
-    if (showSkillsItem) {
-      var skillsBtn = document.createElement("button");
-      skillsBtn.type = "button";
-      skillsBtn.className = "nav-item" + (state.view === "skills" ? " active" : "");
-      skillsBtn.setAttribute("role", "listitem");
-      var skillsLabel = document.createElement("span");
-      skillsLabel.textContent = "Skills";
-      skillsBtn.appendChild(skillsLabel);
-      skillsBtn.addEventListener("click", function () {
-        toggleSidebar(false);
-        showSkills();
-      });
-      els.navList.appendChild(skillsBtn);
+    // No tools in the list (everything filtered out by a search, say),
+    // so there was no boundary to sit at -- put it at the end.
+    if (showSkillsItem && !skillsPlaced) {
+      els.navList.appendChild(makeSkillsButton());
     }
 
     if (q && docs.length === 0 && !showSkillsItem) {
