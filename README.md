@@ -438,10 +438,16 @@ security model shouldn't depend on remembering.
 - The workflow reuses the `FIREBASE_SERVICE_ACCOUNT` secret the Todoist
   sync already uses. The key is written to the runner's temp directory,
   never echoed, never inside the checkout, and deleted afterwards.
-- **If the deploy fails with a permissions error**, that service account
-  needs the **Firebase Rules Admin** role: Google Cloud console → IAM →
-  find the service account → Edit → Add role. The Admin SDK key doesn't
-  always come with it.
+- It calls the Firebase Rules API directly (`scripts/publish_rules.py`)
+  rather than using the Firebase CLI. The CLI checks whether the
+  Firestore API is enabled before deploying, which an Admin SDK service
+  account isn't permitted to read, so it failed with *"Permission denied
+  to get service [firestore.googleapis.com]"* before reaching the rules.
+  Granting the key `serviceusage` rights to satisfy a check whose answer
+  we already know would have been the wrong trade.
+- To compile the rules without publishing:
+  `python3 scripts/publish_rules.py --check-only`. Syntax errors are
+  reported with line and column.
 - To publish without changing anything: Actions → **Publish Firestore
   rules** → Run workflow.
 

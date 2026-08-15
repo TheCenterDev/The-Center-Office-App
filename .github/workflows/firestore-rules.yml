@@ -10,19 +10,23 @@ name: Publish Firestore rules
 # "Missing or insufficient permissions" until someone remembered. The
 # rules are the security model -- they shouldn't depend on remembering.
 #
-# Uses the FIREBASE_SERVICE_ACCOUNT secret that already exists for the
-# Todoist sync. If the deploy fails with a permissions error, that
-# service account needs the "Firebase Rules Admin" role: Google Cloud
-# console -> IAM -> find the service account -> Edit -> Add role. The
-# console paste still works as a fallback, and firestore.rules in this
-# repo remains the source of truth either way.
+# Uses scripts/publish_rules.py rather than the Firebase CLI. The CLI
+# checks whether the Firestore API is enabled before deploying, which a
+# Firebase Admin SDK service account isn't permitted to do, so it failed
+# with "Permission denied to get service [firestore.googleapis.com]"
+# before reaching the rules at all. Widening the key's permissions to
+# satisfy a pre-flight check whose answer we already know would be the
+# wrong trade; the script calls the Rules API directly instead. See the
+# script's own comment for the detail.
+#
+# Uses the FIREBASE_SERVICE_ACCOUNT secret the Todoist sync already uses.
 
 on:
   push:
     branches: [main]
     paths:
       - "firestore.rules"
-      - "firebase.json"
+      - "scripts/publish_rules.py"
       - ".github/workflows/firestore-rules.yml"
   workflow_dispatch: {}
 
@@ -37,13 +41,13 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: "22"
+          python-version: "3.12"
 
-      - name: Install the Firebase CLI
-        run: npm install -g firebase-tools --no-audit --no-fund
+      - name: Install google-auth
+        run: pip install --quiet google-auth
 
       - name: Write the service account key to a file
         env:
@@ -57,56 +61,23 @@ jobs:
           # the run. Never echoed, and never inside the checkout, so it
           # cannot be committed by accident.
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
-          python3 -c "import json,os; json.load(open(os.environ['RUNNER_TEMP'] + '/service-account.json'))" \
-            || { echo "The secret isn't valid JSON."; exit 1; }
-
-      # Prints who the key is and whether it can see the project at all,
-      # before attempting anything. "exit code 1" on its own says
-      # nothing; this distinguishes a missing IAM role from a wrong
-      # project id from a malformed key, which need different fixes.
-      - name: Check the credential can reach the project
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
-        run: |
-          echo "firebase-tools: $(firebase --version)"
+          python3 - <<'EOF'
+          import json, os, sys
+          path = os.environ["RUNNER_TEMP"] + "/service-account.json"
+          try:
+              key = json.load(open(path))
+          except ValueError as e:
+              sys.exit(f"The secret isn't valid JSON: {e}")
           # client_email and project_id identify the key; neither is
           # secret. The private key itself is never printed.
-          python3 - <<'EOF'
-          import json, os
-          key = json.load(open(os.environ["RUNNER_TEMP"] + "/service-account.json"))
           print("service account:", key.get("client_email", "MISSING"))
-          print("key's project_id:", key.get("project_id", "MISSING"))
-          print("key type:", key.get("type", "MISSING"))
+          print("key's project:  ", key.get("project_id", "MISSING"))
           EOF
-          echo "--- can it list projects? ---"
-          firebase projects:list --non-interactive ||             echo "NOTE: listing projects failed. That usually means the service account has no Viewer role on the project."
 
       - name: Publish
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
-        run: |
-          set -o pipefail
-          firebase deploy --only firestore:rules \
-            --project the-center-office-app --non-interactive --debug 2>&1 | tee deploy.log || {
-              echo
-              echo "=============================================="
-              echo "Deploy failed. What the error usually means:"
-              echo
-              if grep -qi "permission\|403\|PERMISSION_DENIED\|insufficient" deploy.log; then
-                echo "  -> The service account can't publish rules."
-                echo "     Google Cloud console -> IAM -> find the account printed"
-                echo "     above -> Edit -> Add role -> 'Firebase Rules Admin'."
-              elif grep -qi "Failed to get Firebase project\|not found\|does not exist" deploy.log; then
-                echo "  -> It can't see the project at all."
-                echo "     Add the 'Viewer' role as well as 'Firebase Rules Admin'."
-              elif grep -qi "compil\|syntax\|Unexpected" deploy.log; then
-                echo "  -> firestore.rules doesn't compile. The line number is above."
-              else
-                echo "  -> Unrecognised failure; the full --debug output is above."
-              fi
-              echo "=============================================="
-              exit 1
-            }
+        run: python3 scripts/publish_rules.py
 
       - name: Remove the key
         if: always()
