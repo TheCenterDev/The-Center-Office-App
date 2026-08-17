@@ -261,6 +261,8 @@ def main() -> int:
         json.dumps(read_skills_from_launcher(), indent=2), encoding="utf-8"
     )
 
+    (OUT_DIR / ".nojekyll").write_text("", encoding="utf-8")
+
     index = build_guides_index()
     (OUT_DIR / "guides-index.json").write_text(json.dumps(index, indent=2), encoding="utf-8")
 
