@@ -194,5 +194,27 @@ service cloud.firestore {
       allow read: if isSignedIn() && hasProfile();
       allow write: if isAdminOrDirector();
     }
+
+    // Receipts (html/Receipts.html) -- replaces Expensify. A shared
+    // expense log: anyone with a profile can add a receipt and fix a
+    // category, because at month end the person who can identify a
+    // charge is usually not the person who swiped the card. Deleting is
+    // narrower -- your own, or Admin/Director -- so a mis-tap can't
+    // quietly remove someone else's paper trail.
+    match /receipts/{receiptId} {
+      allow read, create, update: if isSignedIn() && hasProfile();
+      allow delete: if isSignedIn() && hasProfile() &&
+        (resource.data.createdBy == emailKey() || isAdminOrDirector());
+    }
+
+    // The photo for a receipt, one document per receipt with the same
+    // id, kept separate so listing a month reads a few kilobytes of
+    // fields instead of megabytes of images. Delete follows the receipt
+    // itself (the tool removes the photo first, then the receipt), so
+    // the same ownership rule applies through the createdBy on the
+    // receipt being deleted; here it only needs the flat gate.
+    match /receipt_images/{receiptId} {
+      allow read, create, update, delete: if isSignedIn() && hasProfile();
+    }
   }
 }

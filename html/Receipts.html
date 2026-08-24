@@ -1,0 +1,1301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Receipts</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1a2233; --muted: #6b7486;
+    --line: #e3e6eb; --blue: #2456d6; --green: #1a7f4e; --green-bg: #e8f6ee;
+    --red: #b3261e; --red-bg: #fdecea; --amber: #8a5a00; --amber-bg: #fff4d6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--ink); padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; }
+
+  .formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .formgrid { grid-template-columns: 1fr; } }
+  .formgrid .full { grid-column: 1 / -1; }
+  label.fl { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  select, input[type=text], input[type=date], input[type=email], input[type=password],
+  input[type=number], input[type=search], textarea {
+    font: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
+    outline: none; width: 100%; background: #fff;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  select:focus, input:focus, textarea:focus { border-color: var(--blue); }
+  button { font: inherit; border: none; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
+  .primary { background: var(--blue); color: #fff; }
+  .primary:disabled { background: #b9c4dd; cursor: not-allowed; }
+  .ghost { background: transparent; color: var(--blue); border: 1px solid var(--line); }
+  .danger { background: transparent; color: var(--red); border: 1px solid var(--red-bg); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  /* Amount gets to be big -- it's the field people mistype, and the one
+     Sarah has to chase down later. */
+  input#amount { font-size: 20px; font-weight: 700; padding: 12px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .stat .n { font-size: 22px; font-weight: 700; }
+  .stat .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .stat.warn .n { color: var(--amber); }
+
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: flex-end; }
+  .filters > div { min-width: 130px; }
+  .chip { font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--line); background: #fafbfc; color: var(--muted); cursor: pointer; }
+  .chip.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+  .tablewrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); font-size: 13px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { background: #fafbfc; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td.amt { text-align: right; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.day { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.note { max-width: 240px; white-space: normal; color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 2px 10px; white-space: nowrap; }
+  .tag.ready { background: var(--green-bg); color: var(--green); }
+  .tag.needs { background: var(--amber-bg); color: var(--amber); }
+  .tag.exported { background: #eef1f6; color: var(--muted); }
+  select.inline { font-size: 12.5px; padding: 5px 8px; min-width: 150px; }
+  .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; display: block; background: #fafbfc; }
+  .thumb.none { display: flex; align-items: center; justify-content: center; font-size: 17px; color: var(--muted); cursor: default; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+
+  .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+  .topbar button { padding: 5px 10px; font-size: 12.5px; }
+
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); font-size: 13px; cursor: pointer; background: #fafbfc; }
+  .drop.has { border-color: var(--green); background: var(--green-bg); color: var(--green); font-weight: 600; }
+  .drop.err { border-color: var(--red); background: var(--red-bg); color: var(--red); font-weight: 600; }
+  #preview { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 10px; display: none; }
+
+  .msg { font-size: 13px; margin-top: 10px; min-height: 1em; }
+  .msg.ok { color: var(--green); font-weight: 600; }
+  .msg.bad { color: var(--red); font-weight: 600; }
+
+  /* Full-size receipt viewer. */
+  #viewer { position: fixed; inset: 0; background: rgba(16,20,28,.82); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
+  #viewer.open { display: flex; }
+  #viewer .inner { background: #fff; border-radius: 12px; padding: 14px; max-width: 92vw; max-height: 92vh; overflow: auto; text-align: center; }
+  #viewer img { max-width: 86vw; max-height: 74vh; border-radius: 8px; }
+  #viewer .vhead { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 10px; font-size: 13px; font-weight: 700; }
+
+  .exportbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  details.sumbox { margin-top: 14px; }
+  details.sumbox summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--blue); }
+  pre.sum { background: #fafbfc; border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-size: 12.5px; overflow-x: auto; margin-top: 10px; }
+
+  #authGate { max-width: 360px; margin: 60px auto; }
+  #authGate .card { text-align: center; }
+  #authGate label { text-align: left; display: block; margin-top: 10px; }
+  #authError { color: var(--red); font-size: 13px; min-height: 1em; margin-top: 8px; }
+  #appArea { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Receipts</h1>
+  <p class="sub">Photograph a receipt, say what it was for, and it's filed. Shared live across everyone signed in, on any device.</p>
+
+  <div id="authGate">
+    <div class="card">
+      <h2>Sign in</h2>
+      <p class="sub" style="margin-bottom: 14px;">Same account as the mobile site. Ask an Admin or Director if you don't have one yet.</p>
+      <form id="authForm">
+        <label class="fl">Email</label>
+        <input type="email" id="authEmail" autocomplete="username" required>
+        <label class="fl">Password</label>
+        <input type="password" id="authPassword" autocomplete="current-password" required>
+        <div id="authError"></div>
+        <button class="primary" type="submit" style="width:100%; margin-top:14px;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="appArea">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button class="ghost" id="signOutBtn" type="button">Sign out</button>
+    </div>
+
+    <!-- ------------------------------------------------ add a receipt -->
+    <div class="card">
+      <h2>Add a Receipt</h2>
+      <div class="formgrid">
+        <div class="full">
+          <label class="fl">Receipt photo or PDF</label>
+          <div class="drop" id="drop">
+            Tap to take a photo or choose a file
+            <input type="file" id="file" accept="image/*,application/pdf" style="display:none">
+          </div>
+          <img id="preview" alt="Receipt preview">
+        </div>
+
+        <div>
+          <label class="fl">Amount</label>
+          <input type="number" id="amount" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div>
+          <label class="fl">Date</label>
+          <input type="date" id="date">
+        </div>
+
+        <div>
+          <label class="fl">Vendor / store</label>
+          <input type="text" id="vendor" placeholder="Walmart, Kroger, Amazon…" autocomplete="off" list="vendorList">
+          <datalist id="vendorList"></datalist>
+        </div>
+        <div>
+          <label class="fl">Category (QuickBooks)</label>
+          <select id="category"></select>
+        </div>
+
+        <div>
+          <label class="fl">Site</label>
+          <select id="site"></select>
+        </div>
+        <div>
+          <label class="fl">Program (optional)</label>
+          <select id="program"></select>
+        </div>
+
+        <div>
+          <label class="fl">Paid with</label>
+          <select id="payment"></select>
+        </div>
+        <div>
+          <label class="fl">Card last 4 (if a card)</label>
+          <input type="text" id="last4" inputmode="numeric" maxlength="4" placeholder="1234" autocomplete="off">
+        </div>
+
+        <div class="full">
+          <label class="fl">What was it for? (optional)</label>
+          <textarea id="notes" placeholder="Snacks for Tuesday ASC at Busco"></textarea>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="primary" id="saveBtn" type="button">Save receipt</button>
+        <button class="ghost" id="clearBtn" type="button">Clear</button>
+      </div>
+      <div class="msg" id="formMsg"></div>
+    </div>
+
+    <!-- ------------------------------------------------------- summary -->
+    <div class="stats" id="stats"></div>
+
+    <!-- --------------------------------------------------------- list -->
+    <div class="card">
+      <h2>Receipts</h2>
+      <div class="filters">
+        <div>
+          <label class="fl">Month</label>
+          <select id="fMonth"></select>
+        </div>
+        <div>
+          <label class="fl">Category</label>
+          <select id="fCategory"></select>
+        </div>
+        <div>
+          <label class="fl">Site</label>
+          <select id="fSite"></select>
+        </div>
+        <div>
+          <label class="fl">Paid with</label>
+          <select id="fPayment"></select>
+        </div>
+        <div style="flex:1; min-width:170px;">
+          <label class="fl">Search vendor or note</label>
+          <input type="search" id="fSearch" placeholder="Type to filter…">
+        </div>
+        <button class="ghost" id="refreshBtn" type="button">Refresh</button>
+      </div>
+
+      <div class="filters" style="margin-bottom:16px;">
+        <button class="chip active" data-status="All" type="button">All</button>
+        <button class="chip" data-status="Needs info" type="button">Needs info</button>
+        <button class="chip" data-status="Ready" type="button">Ready</button>
+        <button class="chip" data-status="Exported" type="button">Exported</button>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th></th><th>Date</th><th>Vendor</th><th style="text-align:right">Amount</th>
+              <th>Category</th><th>Site</th><th>Paid with</th><th>Who</th><th>Status</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="msg" id="listMsg"></div>
+    </div>
+
+    <!-- ------------------------------------------------------- export -->
+    <div class="card">
+      <h2>Export</h2>
+      <p class="sub" style="margin-bottom:14px;">Exports cover whatever the filters above are showing right now.</p>
+      <div class="exportbar">
+        <button class="primary" id="expCsv" type="button">Detail CSV</button>
+        <button class="ghost" id="expPdf" type="button">Reconciliation PDF</button>
+        <button class="ghost" id="expMark" type="button">Mark shown as Exported</button>
+      </div>
+      <p class="hint">
+        <strong>Detail CSV</strong> — every field, for QuickBooks entry and for the record.<br>
+        <strong>Reconciliation PDF</strong> — feeds the Credit Card Reconciliation tool in place of the
+        Expensify report. Set <em>Paid with</em> to Capital One card first, then drop it into that
+        tool's Expensify box alongside the statement.<br>
+        <strong>Mark shown as Exported</strong> — stamps these receipts so next month starts clean. Nothing is deleted.
+      </p>
+      <details class="sumbox">
+        <summary>Category totals (for the monthly financials email)</summary>
+        <pre class="sum" id="catSummary"></pre>
+        <button class="ghost" id="copySum" type="button" style="margin-top:10px;">Copy totals</button>
+      </details>
+    </div>
+
+    <!-- ------------------------------------------------ monthly report -->
+    <div class="card" id="qbCard" style="display:none">
+      <h2>Monthly Report — receipts vs QuickBooks</h2>
+      <p class="sub" style="margin-bottom:14px;">Checks the month shown above against what's actually entered
+      in QuickBooks: what matches, what's missing a receipt, and what never got entered.</p>
+      <div class="row">
+        <button class="primary" id="qbBuild" type="button">Build the report</button>
+        <button class="ghost" id="qbConnect" type="button" style="display:none">Connect QuickBooks</button>
+        <button class="ghost" id="qbDownload" type="button" style="display:none">Download the report</button>
+      </div>
+      <div class="msg" id="qbMsg"></div>
+      <div id="qbReport" style="margin-top:14px"></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="viewer">
+  <div class="inner">
+    <div class="vhead">
+      <span id="vTitle"></span>
+      <button class="ghost" id="vClose" type="button">Close</button>
+    </div>
+    <div id="vBody"></div>
+  </div>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="center-session.js"></script>
+<script>
+/* Receipts -- replaces Expensify for capturing and categorising spend.
+ *
+ * Same Firebase project as the mobile site's login; the web API key is
+ * public by design (see web/firebase-config.js for why).
+ *
+ * Two collections:
+ *   receipts        one small document per receipt -- the fields below.
+ *   receipt_images  one document per photo, id matching its receipt,
+ *                   holding the image as a data URL.
+ *
+ * Why the image lives in its own document: the list view reads every
+ * receipt it shows, and a photo is a hundred times the size of the
+ * fields describing it. Keeping them apart means opening the month costs
+ * a few kilobytes instead of several megabytes, and a photo is only
+ * fetched when somebody actually looks at it.
+ *
+ * Why this polls nothing, unlike the Maintenance Log. That tool watches
+ * its whole collection every five seconds, which is fine for a few dozen
+ * rows that rarely change. Receipts accumulate -- a year is a few
+ * thousand -- and re-reading them all every five seconds would spend the
+ * free Firestore plan's 50,000 daily reads within minutes of one person
+ * leaving the page open. So this reads one month at a time, on request:
+ * opening the month, pressing Refresh, or saving something. The trade is
+ * that a receipt another person adds shows up when you next refresh
+ * rather than on its own, which for an expense log nobody watches all
+ * day is the right way round.
+ */
+firebase.initializeApp({
+  apiKey: "AIzaSyB2rLNc8NaBcWzk_kCyhulEIseXeMbNZEg",
+  authDomain: "the-center-office-app.firebaseapp.com",
+  projectId: "the-center-office-app",
+  storageBucket: "the-center-office-app.firebasestorage.app",
+  messagingSenderId: "282726386673",
+  appId: "1:282726386673:web:bdd0c91062a7ac2d0b9250",
+  measurementId: "G-GFVPF8N6ZF",
+});
+const auth = firebase.auth();
+
+// The QuickBooks expense accounts, in the order the monthly financials
+// email lists them. Keep this in step with that list -- a category here
+// that Sarah has to translate by hand defeats the point.
+const CATEGORIES = [
+  "Parsonage", "Consulting - Non CCLC", "Insurance", "Employee Benefits",
+  "Lifewise Academy", "Trips", "Utilities", "Office Expense",
+  "CC Ministry / Programs", "Center Staff Expenses", "Payroll Tax",
+  "Repairs & Maintenance", "Custodial Expense", "Busco Ministry/Expenses",
+  "Development Expenses", "Website", "Vehicle Expenses",
+  "Whitko Ministry/Programs", "Summer Central Programming",
+  "Shared Ministry Program Exp",
+];
+/* Categories carry their QuickBooks account code as well as the name.
+ * The real codes live in QuickBooks, so once it's connected the picker
+ * is built from the live chart of accounts -- codes always right, new
+ * accounts appear on their own. Until then it falls back to the names
+ * above without codes. */
+let categories = CATEGORIES.map(name => ({ code: "", name }));
+const catCode = name => { const c = categories.find(c => c.name === name); return c ? c.code : ""; };
+const catLabel = name => { const code = catCode(name); return code ? code + " \u00b7 " + name : name; };
+
+async function loadAccounts() {
+  if (!WORKER_URL) return;
+  try {
+    const token = await CenterSession.getToken();
+    const res = await fetch(WORKER_URL + "/qb/accounts", { headers: { Authorization: "Bearer " + token } });
+    const out = await res.json();
+    if (out && out.ok && out.accounts && out.accounts.length) {
+      categories = out.accounts;
+      refreshCategoryPickers();
+    }
+  } catch (e) { /* fallback list already in place */ }
+}
+
+const SITES = ["Columbia City", "Whitko", "Churubusco", "Shared / multi-site", "Not site specific"];
+const PROGRAMS = ["", "ASC", "SERVE", "Ground Zero", "Summer Central", "LifeWise Academy",
+  "Life Coaching", "Thrive Challenge / Thrive 100", "iLead", "Trips & Experiences",
+  "Sources of Strength", "The Line", "Alumni WCY", "Administration"];
+const PAYMENTS = ["Capital One card", "Personal - reimburse me", "Check", "ACH / bank transfer", "Cash", "Other"];
+
+/* The worker -- paste your Cloudflare Worker URL here to turn on the
+ * receipt reader and the QuickBooks connection (see
+ * receipt-reader-worker.js for what it is and how to deploy it). Left
+ * empty, the tool works exactly as before: photos attach, people type
+ * the fields, no QuickBooks report. Nothing else changes. */
+const WORKER_URL = "";
+
+// Firestore refuses a document over 1 MiB. Photos are held as base64
+// inside one, so cap the encoded string well under that and let the
+// resize loop below shrink until it fits.
+const MAX_B64 = 700000;
+
+const $ = id => document.getElementById(id);
+let me = { email: "", name: "", role: "staff" };
+let rows = [];              // receipts currently loaded
+let statusFilter = "All";
+let pendingImage = null;    // { dataUrl, mime } waiting to be saved
+const imageCache = {};      // receipt id -> data URL, so reopening is free
+
+const money = n => (n || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const monthOf = iso => (iso || "").slice(0, 7);
+const isAdmin = () => me.role === "admin" || me.role === "director";
+
+/* A receipt is "Needs info" until it has the three things Sarah cannot
+ * reconstruct later: what it cost, what it was for, and proof it
+ * happened. Derived rather than set by hand -- one less field to forget. */
+function statusOf(r) {
+  if (r.exported) return "Exported";
+  if (!r.amount || !r.category || !r.hasImage) return "Needs info";
+  return "Ready";
+}
+function missingBits(r) {
+  const gaps = [];
+  if (!r.amount) gaps.push("amount");
+  if (!r.category) gaps.push("category");
+  if (!r.hasImage) gaps.push("photo");
+  return gaps;
+}
+
+// ------------------------------------------------------------- pickers --
+
+function fillSelect(el, values, { blank } = {}) {
+  el.innerHTML = (blank ? '<option value="">' + blank + "</option>" : "") +
+    values.filter(v => v !== "").map(v => '<option value="' + esc(v) + '">' + esc(v) + "</option>").join("");
+}
+
+/* The two standing category dropdowns, rebuilt whenever the account
+ * list changes (e.g. the live chart of accounts arrives from QB).
+ * Option values stay the plain name; the code is display and export. */
+function refreshCategoryPickers() {
+  const keepForm = $("category").value, keepFilter = $("fCategory").value;
+  const opts = blank => '<option value="">' + blank + "</option>" +
+    categories.map(c => '<option value="' + esc(c.name) + '">' + esc(catLabel(c.name)) + "</option>").join("");
+  $("category").innerHTML = opts("— choose a category —");
+  $("fCategory").innerHTML = opts("All categories");
+  $("category").value = keepForm;
+  $("fCategory").value = keepFilter;
+  if (rows.length) render();
+}
+
+function buildMonthOptions() {
+  const opts = [];
+  const now = new Date();
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = d.toISOString().slice(0, 7);
+    opts.push('<option value="' + key + '">' +
+      d.toLocaleDateString("en-US", { month: "long", year: "numeric" }) + "</option>");
+  }
+  // Fiscal year runs July to June here, so "this year so far" is not
+  // January to now and should not be offered as if it were.
+  $("fMonth").innerHTML = opts.join("") + '<option value="FY">Fiscal year to date</option>';
+}
+
+function fiscalMonths() {
+  const now = new Date();
+  const startYear = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+  const out = [];
+  for (let d = new Date(startYear, 6, 1); d <= now; d.setMonth(d.getMonth() + 1)) {
+    out.push(d.toISOString().slice(0, 7));
+  }
+  return out;
+}
+
+// --------------------------------------------------------------- auth --
+
+$("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const errEl = $("authError");
+  errEl.textContent = "";
+  auth.signInWithEmailAndPassword($("authEmail").value.trim(), $("authPassword").value)
+    .catch(err => { errEl.textContent = err && err.message ? err.message : "Couldn't sign in."; });
+});
+$("signOutBtn").addEventListener("click", () => auth.signOut());
+
+function startApp(profile) {
+  me = {
+    email: (profile.email || "").trim().toLowerCase(),
+    name: profile.name || profile.email || "",
+    role: profile.role || "staff",
+  };
+  $("whoami").textContent = "Signed in as " + me.name;
+  $("authGate").style.display = "none";
+  $("appArea").style.display = "block";
+
+  refreshCategoryPickers();
+  fillSelect($("site"), SITES);
+  fillSelect($("program"), PROGRAMS, { blank: "— none —" });
+  fillSelect($("payment"), PAYMENTS);
+  fillSelect($("fSite"), SITES, { blank: "All sites" });
+  fillSelect($("fPayment"), PAYMENTS, { blank: "All payment types" });
+  buildMonthOptions();
+  $("date").value = todayISO();
+  loadAccounts();
+  qbShowCard();
+  load();
+}
+
+if (CenterSession.isHandedOver()) {
+  // Opened from the desktop app, which already knows who is signed in --
+  // no second login. Signing out happens in the app itself.
+  $("signOutBtn").style.display = "none";
+  startApp(CenterSession.user());
+} else {
+  auth.onAuthStateChanged(user => {
+    if (!user) {
+      $("authGate").style.display = "block";
+      $("appArea").style.display = "none";
+      return;
+    }
+    CenterSession.getDoc("users", user.email.trim().toLowerCase()).then(profile => {
+      if (!profile) {
+        $("authGate").style.display = "block";
+        $("appArea").style.display = "none";
+        $("authError").textContent =
+          "Signed in, but you don't have a profile yet -- ask an Admin or Director to add you on the mobile site's Team page.";
+        return;
+      }
+      profile.email = user.email;
+      startApp(profile);
+    }).catch(err => { $("authError").textContent = err.message; });
+  });
+}
+
+// ------------------------------------------------------- photo capture --
+
+$("drop").addEventListener("click", () => $("file").click());
+$("drop").addEventListener("dragover", e => { e.preventDefault(); });
+$("drop").addEventListener("drop", e => {
+  e.preventDefault();
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) takeFile(e.dataTransfer.files[0]);
+});
+$("file").addEventListener("change", e => { if (e.target.files[0]) takeFile(e.target.files[0]); });
+
+function dropState(cls, text) {
+  const d = $("drop");
+  d.className = "drop" + (cls ? " " + cls : "");
+  d.childNodes[0].nodeValue = text;
+}
+
+/* Shrink a photo until its base64 fits a Firestore document. Phone
+ * cameras produce 3-5 MB files; a receipt only has to stay readable, so
+ * the long edge is capped and quality stepped down until it fits. */
+function shrink(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let edge = 1500, quality = 0.72, out = "";
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const scale = Math.min(1, edge / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * scale));
+        c.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        out = c.toDataURL("image/jpeg", quality);
+        if (out.length <= MAX_B64) return resolve(out);
+        if (quality > 0.42) quality -= 0.1; else edge = Math.round(edge * 0.75);
+      }
+      resolve(out); // eight passes in, this is as small as it gets
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(
+        "This browser couldn't open that image. iPhone photos saved as HEIC " +
+        "sometimes do this on a computer -- taking the photo in the app, or " +
+        "screenshotting it first, works."));
+    };
+    img.src = url;
+  });
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error("Couldn't read that file."));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function takeFile(file) {
+  $("formMsg").textContent = "";
+  $("preview").style.display = "none";
+  pendingImage = null;
+  dropState("", "Working on it…");
+  try {
+    if (file.type === "application/pdf") {
+      const dataUrl = await readAsDataUrl(file);
+      if (dataUrl.length > MAX_B64) {
+        dropState("err", "That PDF is too big (about " + Math.round(file.size / 1024) +
+          " KB). Save just the receipt page, or screenshot it and attach the picture.");
+        return;
+      }
+      pendingImage = { dataUrl, mime: "application/pdf" };
+      dropState("has", "PDF attached — " + file.name);
+      readReceipt(pendingImage);
+      return;
+    }
+    const dataUrl = await shrink(file);
+    pendingImage = { dataUrl, mime: "image/jpeg" };
+    $("preview").src = dataUrl;
+    $("preview").style.display = "block";
+    dropState("has", "Photo attached — tap to replace");
+    readReceipt(pendingImage);
+  } catch (err) {
+    dropState("err", err.message);
+  }
+}
+
+// ------------------------------------------------------ receipt reader --
+
+/* Sends the attached photo to the reader and fills in whatever comes
+ * back -- but only into boxes still empty, so it never overwrites
+ * something a person has typed. Runs in the background: the form stays
+ * usable, and if the reader is off, slow, or wrong, the tool is exactly
+ * what it was before the reader existed. */
+let readSeq = 0;
+async function readReceipt(image) {
+  if (!WORKER_URL || !image) return;
+  const seq = ++readSeq;
+  const msg = $("formMsg");
+  msg.className = "msg";
+  msg.textContent = "Reading the receipt…";
+  try {
+    const token = await CenterSession.getToken();
+    const res = await fetch(WORKER_URL + "/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ mime: image.mime, data: image.dataUrl.split(",")[1] || "" }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (seq !== readSeq || image !== pendingImage) return; // a newer photo replaced this one
+    if (!res.ok || !out.ok) {
+      msg.textContent = (out && out.error) || "Couldn't read it — fill the fields in by hand.";
+      return;
+    }
+    const f = out.fields || {};
+    const filled = [];
+    if (f.amount && !parseFloat($("amount").value)) { $("amount").value = f.amount.toFixed(2); filled.push("amount"); }
+    if (f.date && $("date").value === todayISO()) { $("date").value = f.date; filled.push("date"); }
+    if (f.vendor && !$("vendor").value.trim()) { $("vendor").value = f.vendor; filled.push("vendor"); }
+    if (f.category && !$("category").value) { $("category").value = f.category; filled.push("category"); }
+    if (f.summary && !$("notes").value.trim()) { $("notes").value = f.summary; filled.push("note"); }
+    if (filled.length) {
+      msg.className = "msg ok";
+      msg.textContent = "Read the receipt and filled in the " + filled.join(", ") +
+        " — check them before saving.";
+    } else {
+      msg.textContent = "Read the receipt but everything was already filled in.";
+    }
+  } catch (err) {
+    if (seq !== readSeq) return;
+    msg.textContent = "Couldn't reach the reader — fill the fields in by hand.";
+  }
+}
+
+// ---------------------------------------------------------------- save --
+
+function newId() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+
+$("clearBtn").addEventListener("click", resetForm);
+function resetForm() {
+  ["amount", "vendor", "last4", "notes"].forEach(id => { $(id).value = ""; });
+  $("category").value = "";
+  $("program").value = "";
+  $("date").value = todayISO();
+  pendingImage = null;
+  $("preview").style.display = "none";
+  $("file").value = "";
+  dropState("", "Tap to take a photo or choose a file");
+}
+
+$("saveBtn").addEventListener("click", async () => {
+  const msg = $("formMsg");
+  const amount = parseFloat($("amount").value);
+  const vendor = $("vendor").value.trim();
+  const date = $("date").value;
+
+  if (!date) { msg.className = "msg bad"; msg.textContent = "Pick the date on the receipt."; return; }
+  if (!vendor) { msg.className = "msg bad"; msg.textContent = "Who was it paid to?"; return; }
+  if (!(amount > 0)) { msg.className = "msg bad"; msg.textContent = "Enter the amount."; return; }
+
+  const id = newId();
+  const record = {
+    date: date,
+    month: monthOf(date),
+    vendor: vendor,
+    amount: Math.round(amount * 100) / 100,
+    category: $("category").value,
+    categoryCode: catCode($("category").value),
+    site: $("site").value,
+    program: $("program").value,
+    payment: $("payment").value,
+    last4: $("last4").value.replace(/\D/g, "").slice(0, 4),
+    notes: $("notes").value.trim(),
+    hasImage: !!pendingImage,
+    imageMime: pendingImage ? pendingImage.mime : "",
+    exported: false,
+    exportedAt: "",
+    paidBy: me.name,
+    createdBy: me.email,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  $("saveBtn").disabled = true;
+  msg.className = "msg";
+  msg.textContent = "Saving…";
+  try {
+    // Image first: if it fails, no receipt claims to have a photo it
+    // hasn't got. A receipt with no photo is a nuisance; a receipt that
+    // lies about having one is a problem at audit.
+    if (pendingImage) {
+      await CenterSession.setDoc("receipt_images", id, {
+        receiptId: id, mime: pendingImage.mime, data: pendingImage.dataUrl,
+        uploadedBy: me.email, uploadedAt: new Date().toISOString(),
+      });
+      imageCache[id] = pendingImage.dataUrl;
+    }
+    await CenterSession.setDoc("receipts", id, record);
+    msg.className = "msg ok";
+    msg.textContent = "Saved — " + money(record.amount) + " at " + record.vendor +
+      (record.category ? "" : " (still needs a category)");
+    resetForm();
+    if ($("fMonth").value === record.month || $("fMonth").value === "FY") {
+      await load();
+    }
+  } catch (err) {
+    msg.className = "msg bad";
+    msg.textContent = "Couldn't save: " + err.message;
+  } finally {
+    $("saveBtn").disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------- load --
+
+async function load() {
+  const listMsg = $("listMsg");
+  listMsg.className = "msg";
+  listMsg.textContent = "Loading…";
+  const pick = $("fMonth").value;
+  const months = pick === "FY" ? fiscalMonths() : [pick];
+  try {
+    const batches = await Promise.all(
+      months.map(m => CenterSession.queryCollection("receipts", "month", "EQUAL", m)));
+    rows = batches.flat().sort((a, b) =>
+      (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
+    listMsg.textContent = "";
+    // Vendors already used make the next entry a two-tap job.
+    const seen = [...new Set(rows.map(r => r.vendor).filter(Boolean))].sort();
+    $("vendorList").innerHTML = seen.map(v => '<option value="' + esc(v) + '">').join("");
+    render();
+  } catch (err) {
+    listMsg.className = "msg bad";
+    listMsg.textContent = "Couldn't load receipts: " + err.message;
+  }
+}
+
+["fMonth", "fCategory", "fSite", "fPayment"].forEach(id =>
+  $(id).addEventListener("change", () => { if (id === "fMonth") load(); else render(); }));
+$("fSearch").addEventListener("input", render);
+$("refreshBtn").addEventListener("click", load);
+document.querySelectorAll(".chip[data-status]").forEach(chip =>
+  chip.addEventListener("click", () => {
+    document.querySelectorAll(".chip[data-status]").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    statusFilter = chip.dataset.status;
+    render();
+  }));
+
+function visible() {
+  const cat = $("fCategory").value, site = $("fSite").value, pay = $("fPayment").value;
+  const q = $("fSearch").value.trim().toLowerCase();
+  return rows.filter(r => {
+    if (cat && r.category !== cat) return false;
+    if (site && r.site !== site) return false;
+    if (pay && r.payment !== pay) return false;
+    if (statusFilter !== "All" && statusOf(r) !== statusFilter) return false;
+    if (q) {
+      const hay = ((r.vendor || "") + " " + (r.notes || "") + " " + (r.paidBy || "") + " " + (r.last4 || "")).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+// -------------------------------------------------------------- render --
+
+function render() {
+  const list = visible();
+  const total = list.reduce((s, r) => s + (r.amount || 0), 0);
+  const needs = list.filter(r => statusOf(r) === "Needs info").length;
+  const noPhoto = list.filter(r => !r.hasImage).length;
+
+  $("stats").innerHTML = [
+    ['<div class="n">' + list.length + "</div>", "Receipts shown"],
+    ['<div class="n">' + money(total) + "</div>", "Total shown"],
+    ['<div class="n">' + needs + "</div>", "Need info", needs ? "warn" : ""],
+    ['<div class="n">' + noPhoto + "</div>", "Missing a photo", noPhoto ? "warn" : ""],
+  ].map(([n, l, cls]) =>
+    '<div class="stat ' + (cls || "") + '">' + n + '<div class="l">' + l + "</div></div>").join("");
+
+  if (!list.length) {
+    $("tbody").innerHTML = '<tr><td colspan="10" class="empty">' +
+      (rows.length ? "No receipts match these filters." : "No receipts for this month yet.") + "</td></tr>";
+  } else {
+    $("tbody").innerHTML = list.map(r => {
+      const st = statusOf(r);
+      const cls = st === "Ready" ? "ready" : st === "Exported" ? "exported" : "needs";
+      const gaps = missingBits(r);
+      const canDelete = isAdmin() || r.createdBy === me.email;
+      return "<tr>" +
+        "<td>" + (r.hasImage
+          ? '<div class="thumb thumb-btn" data-view="' + esc(r.id) + '" title="View receipt">' +
+            '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:17px">' +
+            (r.imageMime === "application/pdf" ? "\u{1F4C4}" : "\u{1F5BC}") + "</div></div>"
+          : '<div class="thumb none" title="No photo attached">—</div>') + "</td>" +
+        '<td class="day">' + esc(r.date) + "</td>" +
+        "<td><strong>" + esc(r.vendor) + "</strong>" +
+          (r.notes ? '<div class="note">' + esc(r.notes) + "</div>" : "") + "</td>" +
+        '<td class="amt">' + money(r.amount) + "</td>" +
+        "<td>" + categorySelect(r) + "</td>" +
+        "<td>" + esc(r.site || "") + (r.program ? '<div class="note">' + esc(r.program) + "</div>" : "") + "</td>" +
+        "<td>" + esc(r.payment || "") + (r.last4 ? " ·" + esc(r.last4) : "") + "</td>" +
+        "<td>" + esc(r.paidBy || "") + "</td>" +
+        '<td><span class="tag ' + cls + '">' + st + "</span>" +
+          (gaps.length ? '<div class="note">needs ' + gaps.join(", ") + "</div>" : "") + "</td>" +
+        "<td>" + (canDelete
+          ? '<button class="danger" data-del="' + esc(r.id) + '" type="button" style="padding:5px 10px;font-size:12px">Delete</button>'
+          : "") + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+  renderSummary(list);
+}
+
+function categorySelect(r) {
+  const opts = ['<option value="">— needs a category —</option>']
+    .concat(categories.map(c =>
+      '<option value="' + esc(c.name) + '"' + (c.name === r.category ? " selected" : "") + ">" + esc(catLabel(c.name)) + "</option>"));
+  // A category saved before an account was renamed in QB still shows.
+  if (r.category && !categories.some(c => c.name === r.category)) {
+    opts.push('<option value="' + esc(r.category) + '" selected>' + esc(r.category) + "</option>");
+  }
+  return '<select class="inline" data-cat="' + esc(r.id) + '">' + opts.join("") + "</select>";
+}
+
+// Category changes are the edit that actually happens in bulk -- at month
+// end, going down the list. So they save straight from the row.
+$("tbody").addEventListener("change", async e => {
+  const id = e.target.dataset && e.target.dataset.cat;
+  if (!id) return;
+  const row = rows.find(r => r.id === id);
+  if (!row) return;
+  const value = e.target.value;
+  e.target.disabled = true;
+  try {
+    await CenterSession.setDoc("receipts", id,
+      { category: value, categoryCode: catCode(value), updatedAt: new Date().toISOString() }, { merge: true });
+    row.category = value;
+    row.categoryCode = catCode(value);
+    render();
+  } catch (err) {
+    $("listMsg").className = "msg bad";
+    $("listMsg").textContent = "Couldn't change the category: " + err.message;
+  } finally {
+    e.target.disabled = false;
+  }
+});
+
+$("tbody").addEventListener("click", async e => {
+  const view = e.target.closest("[data-view]");
+  if (view) return showImage(view.dataset.view);
+  const del = e.target.closest("[data-del]");
+  if (!del) return;
+  const id = del.dataset.del;
+  const row = rows.find(r => r.id === id);
+  if (!row) return;
+  if (!confirm("Delete the " + money(row.amount) + " receipt from " + row.vendor +
+      "?\n\nThis removes the photo too and can't be undone.")) return;
+  del.disabled = true;
+  try {
+    if (row.hasImage) {
+      await CenterSession.deleteDoc("receipt_images", id).catch(() => {});
+    }
+    await CenterSession.deleteDoc("receipts", id);
+    rows = rows.filter(r => r.id !== id);
+    render();
+  } catch (err) {
+    $("listMsg").className = "msg bad";
+    $("listMsg").textContent = "Couldn't delete: " + err.message;
+    del.disabled = false;
+  }
+});
+
+// ------------------------------------------------------- receipt viewer --
+
+$("vClose").addEventListener("click", () => $("viewer").classList.remove("open"));
+$("viewer").addEventListener("click", e => { if (e.target.id === "viewer") $("viewer").classList.remove("open"); });
+
+async function showImage(id) {
+  const row = rows.find(r => r.id === id);
+  const v = $("viewer"), body = $("vBody");
+  $("vTitle").textContent = row ? row.vendor + " — " + money(row.amount) + " — " + row.date : "Receipt";
+  body.innerHTML = '<p class="sub">Loading the receipt…</p>';
+  v.classList.add("open");
+  try {
+    let dataUrl = imageCache[id];
+    if (!dataUrl) {
+      const doc = await CenterSession.getDoc("receipt_images", id);
+      if (!doc || !doc.data) { body.innerHTML = '<p class="sub">That photo is missing.</p>'; return; }
+      dataUrl = doc.data;
+      imageCache[id] = dataUrl;
+    }
+    if (dataUrl.startsWith("data:application/pdf")) {
+      // Browsers won't render a PDF inline from a data URL reliably, so
+      // hand it over as a real file instead.
+      const blob = await (await fetch(dataUrl)).blob();
+      const url = URL.createObjectURL(blob);
+      body.innerHTML = '<p class="sub" style="margin-bottom:12px">This receipt is a PDF.</p>' +
+        '<a class="ghost" style="display:inline-block;padding:9px 16px;border-radius:8px;text-decoration:none" ' +
+        'href="' + url + '" target="_blank" rel="noopener">Open the PDF</a>';
+    } else {
+      body.innerHTML = '<img src="' + dataUrl + '" alt="Receipt">';
+    }
+  } catch (err) {
+    body.innerHTML = '<p class="sub">Couldn\'t load it: ' + esc(err.message) + "</p>";
+  }
+}
+
+// ----------------------------------------------------- category totals --
+
+function renderSummary(list) {
+  const totals = {};
+  let uncategorised = 0, uncatCount = 0;
+  list.forEach(r => {
+    if (!r.category) { uncategorised += r.amount || 0; uncatCount++; return; }
+    totals[r.category] = (totals[r.category] || 0) + (r.amount || 0);
+  });
+  const ordered = categories.filter(c => totals[c.name]).map(c => [catLabel(c.name), totals[c.name]]);
+  // A category not in the current account list (renamed in QB) still totals.
+  Object.keys(totals).forEach(name => {
+    if (!categories.some(c => c.name === name)) ordered.push([name, totals[name]]);
+  });
+  const width = Math.max(0, ...ordered.map(([c]) => c.length));
+  const lines = ordered.map(([c, n]) => "  " + c.padEnd(width) + "   " + money(n));
+  if (uncatCount) {
+    lines.push("");
+    lines.push("  " + ("NOT YET CATEGORISED (" + uncatCount + ")").padEnd(width) + "   " + money(uncategorised));
+  }
+  lines.push("");
+  lines.push("  " + "TOTAL".padEnd(width) + "   " + money(list.reduce((s, r) => s + (r.amount || 0), 0)));
+  lines.push("");
+  lines.push("  Receipts only — not the full P&L.");
+  $("catSummary").textContent = lines.join("\n") || "Nothing to total.";
+}
+
+$("copySum").addEventListener("click", () => {
+  navigator.clipboard.writeText($("catSummary").textContent)
+    .then(() => { $("copySum").textContent = "Copied"; setTimeout(() => { $("copySum").textContent = "Copy totals"; }, 1500); })
+    .catch(() => { $("copySum").textContent = "Couldn't copy — select it by hand"; });
+});
+
+// ------------------------------------------------------------- exports --
+
+function download(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function stamp() {
+  const pick = $("fMonth").value;
+  return pick === "FY" ? "fiscal-year-to-date" : pick;
+}
+
+$("expCsv").addEventListener("click", () => {
+  const list = visible();
+  if (!list.length) { exportMsg("Nothing to export with these filters.", true); return; }
+  const cols = ["Date", "Vendor", "Amount", "Category code", "Category", "Site", "Program",
+    "Paid with", "Card last 4", "Paid by", "What it was for", "Has photo", "Status", "Entered", "Receipt ID"];
+  const cell = v => {
+    const s = String(v == null ? "" : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const body = list.map(r => [r.date, r.vendor, (r.amount || 0).toFixed(2),
+    r.categoryCode || catCode(r.category), r.category, r.site,
+    r.program, r.payment, r.last4, r.paidBy, r.notes, r.hasImage ? "yes" : "no",
+    statusOf(r), (r.createdAt || "").slice(0, 10), r.id].map(cell).join(","));
+  download("receipts-" + stamp() + ".csv", [cols.join(","), ...body].join("\r\n"), "text/csv;charset=utf-8");
+  exportMsg("Downloaded " + list.length + " receipts as a CSV.");
+});
+
+/* ---- Reconciliation PDF -------------------------------------------------
+ *
+ * The Credit Card Reconciliation tool takes an Expensify report PDF and a
+ * Capital One PDF, pulls text lines out of both with pdf.js, and keeps any
+ * line shaped "date  description  amount". So the way to retire Expensify
+ * without touching that tool is to hand it a PDF of exactly that shape.
+ * That is all this writes: Helvetica, one receipt per line, no styling.
+ *
+ * The one thing to respect is that tool's skip list, which throws away
+ * lines that read like statement furniture ("new balance", "rewards", and
+ * so on). A vendor name containing one of those words would be silently
+ * dropped, so those receipts are counted and reported rather than lost
+ * quietly. */
+const RECON_SKIP = /payment due|minimum payment|previous balance|new balance|credit limit|available credit|cash advance|balance transfer|interest charge|annual percentage|total fees|total transactions|page \d+ of|billing cycle|rewards|statement|transactions\b/i;
+
+function pdfEscape(s) {
+  return String(s).replace(/[^\x20-\x7E]/g, "").replace(/([\\()])/g, "\\$1");
+}
+
+function buildPdf(lines) {
+  const PER_PAGE = 46;
+  const pages = [];
+  for (let i = 0; i < lines.length; i += PER_PAGE) pages.push(lines.slice(i, i + PER_PAGE));
+  if (!pages.length) pages.push([]);
+
+  const obj = [];                 // obj[n] = body of object n
+  const pageNums = [], contentNums = [];
+  let next = 4;                   // 1 catalog, 2 page tree, 3 font
+  pages.forEach(() => { pageNums.push(next++); contentNums.push(next++); });
+
+  obj[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  obj[2] = "<< /Type /Pages /Kids [" + pageNums.map(n => n + " 0 R").join(" ") +
+    "] /Count " + pages.length + " >>";
+  obj[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+
+  pages.forEach((pageLines, i) => {
+    obj[pageNums[i]] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] " +
+      "/Resources << /Font << /F1 3 0 R >> >> /Contents " + contentNums[i] + " 0 R >>";
+    const stream = "BT /F1 10 Tf 14 TL 44 748 Td\n" +
+      pageLines.map(l => "(" + pdfEscape(l) + ") Tj T*\n").join("") + "ET";
+    obj[contentNums[i]] = "<< /Length " + stream.length + " >>\nstream\n" + stream + "\nendstream";
+  });
+
+  // Every byte here is ASCII, so string length is byte length and the
+  // cross-reference offsets below are simply positions in this string.
+  let out = "%PDF-1.4\n";
+  const offset = [];
+  for (let n = 1; n < next; n++) {
+    offset[n] = out.length;
+    out += n + " 0 obj\n" + obj[n] + "\nendobj\n";
+  }
+  const xref = out.length;
+  out += "xref\n0 " + next + "\n0000000000 65535 f \n";
+  for (let n = 1; n < next; n++) out += String(offset[n]).padStart(10, "0") + " 00000 n \n";
+  out += "trailer\n<< /Size " + next + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF";
+  return out;
+}
+
+$("expPdf").addEventListener("click", () => {
+  const list = visible();
+  if (!list.length) { exportMsg("Nothing to export with these filters.", true); return; }
+
+  // This PDF gets matched against the Capital One statement, so checks,
+  // cash, and reimbursements in it only show up as false mismatches.
+  // Easy to do by accident -- the payment filter defaults to everything.
+  const offCard = list.filter(r => r.payment !== "Capital One card");
+  if (offCard.length && !confirm(
+    offCard.length + " of these " + list.length + " receipts weren't paid on the " +
+    "Capital One card (checks, cash, reimbursements), and the statement will " +
+    "never match them.\n\nUsually you want the Paid-with filter set to " +
+    "Capital One card first.\n\nExport all " + list.length + " anyway?")) {
+    exportMsg("Export cancelled — set Paid with to Capital One card and try again.");
+    return;
+  }
+
+  const usable = [], collided = [];
+  list.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).forEach(r => {
+    const vendor = String(r.vendor || "").replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").trim() || "Unknown vendor";
+    const line = r.date + " " + vendor + " " + (r.amount || 0).toFixed(2);
+    if (RECON_SKIP.test(line)) collided.push(r); else usable.push(line);
+  });
+
+  const header = [
+    "The Center for Whitley County Youth - Receipt Export",
+    "Prepared " + todayISO() + " by " + (me.name || me.email),
+    "Covering " + stamp() + " - " + usable.length + " receipts",
+    "",
+  ];
+  download("receipts-for-reconciliation-" + stamp() + ".pdf",
+    buildPdf(header.concat(usable)), "application/pdf");
+
+  exportMsg("Built a PDF with " + usable.length + " receipts. Open the Credit Card Reconciliation " +
+    "tool and drop it into the Expensify box." +
+    (collided.length ? " " + collided.length + " were left out because the vendor name reads like " +
+      "statement wording (" + collided.map(r => r.vendor).join(", ") + ") — add those by hand." : ""),
+    collided.length > 0);
+});
+
+$("expMark").addEventListener("click", async () => {
+  const list = visible().filter(r => !r.exported);
+  if (!list.length) { exportMsg("Everything shown is already marked Exported.", true); return; }
+  if (!confirm("Mark " + list.length + " receipt(s) as Exported?\n\nNothing is deleted — they just stop " +
+    "showing up as outstanding.")) return;
+  $("expMark").disabled = true;
+  exportMsg("Marking " + list.length + "…");
+  try {
+    const at = new Date().toISOString();
+    for (const r of list) {
+      await CenterSession.setDoc("receipts", r.id,
+        { exported: true, exportedAt: at, updatedAt: at }, { merge: true });
+      r.exported = true;
+      r.exportedAt = at;
+    }
+    render();
+    exportMsg("Marked " + list.length + " as Exported.");
+  } catch (err) {
+    exportMsg("Stopped partway through: " + err.message, true);
+  } finally {
+    $("expMark").disabled = false;
+  }
+});
+
+/* ------------------------------------------------- QuickBooks report --
+ *
+ * The three-way check Sarah used to assemble by hand: every receipt for
+ * the month against every purchase actually entered in QuickBooks.
+ * Matching is the same idea as the Credit Card Reconciliation tool --
+ * exact amount, dates within a few days, closest date wins -- because
+ * that's the standard an auditor applies too.
+ */
+let qbLastReportHtml = "";
+
+function qbShowCard() {
+  $("qbCard").style.display = WORKER_URL ? "block" : "none";
+}
+
+function reportRange() {
+  const pick = $("fMonth").value;
+  if (pick === "FY") {
+    const months = fiscalMonths();
+    const last = months[months.length - 1];
+    return { from: months[0] + "-01", to: last + "-31", label: "fiscal year to date" };
+  }
+  return { from: pick + "-01", to: pick + "-31", label: $("fMonth").selectedOptions[0].textContent };
+}
+
+function matchReceiptsToQb(receipts, qb) {
+  const cents = n => Math.round((n || 0) * 100);
+  const days = (a, b) => Math.abs(new Date(a) - new Date(b)) / 86400000;
+  const candidates = [];
+  receipts.forEach(r => qb.forEach(q => {
+    if (cents(r.amount) !== cents(q.amount)) return;
+    const gap = days(r.date, q.date);
+    if (gap > 6) return;
+    candidates.push({ gap, r, q });
+  }));
+  candidates.sort((a, b) => a.gap - b.gap);
+  const rUsed = new Set(), qUsed = new Set(), pairs = [];
+  candidates.forEach(c => {
+    if (rUsed.has(c.r.id) || qUsed.has(c.q.id)) return;
+    rUsed.add(c.r.id); qUsed.add(c.q.id);
+    pairs.push(c);
+  });
+  return {
+    pairs,
+    unmatchedReceipts: receipts.filter(r => !rUsed.has(r.id)),
+    unmatchedQb: qb.filter(q => !qUsed.has(q.id)),
+  };
+}
+
+function buildReportHtml(range, receipts, qb) {
+  const m = matchReceiptsToQb(receipts, qb);
+  const catDisagree = m.pairs.filter(p =>
+    p.r.category && p.q.category && p.q.category.indexOf(p.r.category) === -1);
+  const sum = list => list.reduce((s, x) => s + (x.amount || 0), 0);
+  const sec = (title, tag, rowsHtml, empty) =>
+    "<h3 style='margin:18px 0 8px;font-size:14px'>" + title + " " + tag + "</h3>" +
+    (rowsHtml || "<p style='color:#6b7486;font-size:13px'>" + empty + "</p>");
+  const tag = (n, good) => "<span style='font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;background:" +
+    (good ? "#e8f6ee;color:#1a7f4e" : n ? "#fdecea;color:#b3261e" : "#e8f6ee;color:#1a7f4e") + "'>" + n + "</span>";
+  const tbl = rows => rows.length ?
+    "<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12.5px'>" +
+    rows.map(r => "<tr>" + r.map(c =>
+      "<td style='padding:6px 10px;border-bottom:1px solid #e3e6eb'>" + c + "</td>").join("") + "</tr>").join("") +
+    "</table></div>" : "";
+
+  const rRow = r => [r.date, esc(r.vendor), money(r.amount),
+    esc((r.categoryCode || catCode(r.category)) ? (r.categoryCode || catCode(r.category)) + " \u00b7 " + r.category : (r.category || "—")),
+    esc(r.paidBy || ""), esc(r.notes || "")];
+  const qRow = q => [q.date, esc(q.vendor), money(q.amount),
+    esc(q.category || "—"), esc(q.paidFrom || ""), esc(q.memo || "")];
+
+  const totals = {};
+  receipts.forEach(r => { const k = r.category || "(uncategorised)";
+    totals[k] = totals[k] || { r: 0, q: 0 }; totals[k].r += r.amount || 0; });
+  qb.forEach(q => { const k = q.category || "(no account)";
+    totals[k] = totals[k] || { r: 0, q: 0 }; totals[k].q += q.amount || 0; });
+  const totalRows = Object.keys(totals).sort().map(k => {
+    const t = totals[k];
+    const off = Math.abs(t.r - t.q) > 0.005;
+    return [esc(catLabel(k) || k), money(t.r), money(t.q),
+      off ? "<strong style='color:#b3261e'>" + money(t.r - t.q) + "</strong>" : "—"];
+  });
+
+  return "<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#1a2233'>" +
+    "<h2 style='font-size:17px;margin-bottom:2px'>Receipts vs QuickBooks — " + esc(range.label) + "</h2>" +
+    "<p style='color:#6b7486;font-size:12.5px;margin-bottom:14px'>Prepared " + todayISO() +
+    " · " + receipts.length + " receipts (" + money(sum(receipts)) + ") · " +
+    qb.length + " QuickBooks purchases (" + money(sum(qb)) + ") · " + m.pairs.length + " matched</p>" +
+
+    sec("Receipts not yet entered in QuickBooks", tag(m.unmatchedReceipts.length),
+      tbl(m.unmatchedReceipts.map(rRow)), "Every receipt is in QuickBooks.") +
+    sec("In QuickBooks with no receipt on file", tag(m.unmatchedQb.length),
+      tbl(m.unmatchedQb.map(qRow)), "Every QuickBooks purchase has a receipt. That's the audit answer you want.") +
+    sec("Matched, but categorised differently", tag(catDisagree.length),
+      tbl(catDisagree.map(p => [p.r.date, esc(p.r.vendor), money(p.r.amount),
+        "receipt says <strong>" + esc(p.r.category) + "</strong>",
+        "QB says <strong>" + esc(p.q.category) + "</strong>"])),
+      "Matched purchases agree on the category.") +
+    sec("Category totals", tag(0, true),
+      tbl([["<strong>Account</strong>", "<strong>Receipts</strong>", "<strong>QuickBooks</strong>", "<strong>Gap</strong>"]]
+        .concat(totalRows)), "Nothing this period.") +
+    "</div>";
+}
+
+async function qbFetch(path) {
+  const token = await CenterSession.getToken();
+  const res = await fetch(WORKER_URL + path, { headers: { Authorization: "Bearer " + token } });
+  return res.json();
+}
+
+$("qbBuild").addEventListener("click", async () => {
+  const msg = $("qbMsg");
+  msg.className = "msg"; msg.textContent = "Asking QuickBooks…";
+  $("qbConnect").style.display = "none";
+  $("qbBuild").disabled = true;
+  try {
+    const range = reportRange();
+    const out = await qbFetch("/qb/expenses?from=" + range.from + "&to=" + range.to);
+    if (out.notConnected || out.reconnect) {
+      msg.className = "msg bad";
+      msg.textContent = out.notConnected
+        ? "QuickBooks isn't connected yet."
+        : "The QuickBooks connection has lapsed — connect it again.";
+      if (isAdmin()) $("qbConnect").style.display = "inline-block";
+      else msg.textContent += " Ask an Admin or Director to press Connect on their screen.";
+      return;
+    }
+    if (!out.ok) { msg.className = "msg bad"; msg.textContent = out.error || "QuickBooks didn't answer."; return; }
+    qbLastReportHtml = buildReportHtml(range, rows, out.expenses);
+    $("qbReport").innerHTML = qbLastReportHtml;
+    $("qbDownload").style.display = "inline-block";
+    msg.className = "msg ok";
+    msg.textContent = "Report built from " + rows.length + " receipts and " + out.expenses.length + " QuickBooks purchases.";
+  } catch (err) {
+    msg.className = "msg bad";
+    msg.textContent = "Couldn't build the report: " + err.message;
+  } finally {
+    $("qbBuild").disabled = false;
+  }
+});
+
+$("qbConnect").addEventListener("click", async () => {
+  const msg = $("qbMsg");
+  msg.className = "msg"; msg.textContent = "Getting the Intuit sign-in link…";
+  try {
+    const token = await CenterSession.getToken();
+    const res = await fetch(WORKER_URL + "/qb/connect", {
+      method: "POST", headers: { Authorization: "Bearer " + token } });
+    const out = await res.json();
+    if (!out.ok) { msg.className = "msg bad"; msg.textContent = out.error || "Couldn't start the connection."; return; }
+    window.open(out.url, "_blank");
+    msg.textContent = "Sign in to Intuit in the tab that opened, then come back and build the report.";
+  } catch (err) {
+    msg.className = "msg bad"; msg.textContent = err.message;
+  }
+});
+
+$("qbDownload").addEventListener("click", () => {
+  if (!qbLastReportHtml) return;
+  const range = reportRange();
+  download("receipts-vs-quickbooks-" + stamp() + ".html",
+    "<!DOCTYPE html><meta charset='utf-8'><title>Receipts vs QuickBooks</title>" +
+    "<body style='max-width:900px;margin:30px auto;padding:0 16px'>" + qbLastReportHtml + "</body>",
+    "text/html;charset=utf-8");
+});
+
+function exportMsg(text, bad) {
+  const el = $("listMsg");
+  el.className = "msg " + (bad ? "bad" : "ok");
+  el.textContent = text;
+}
+</script>
+</body>
+</html>
