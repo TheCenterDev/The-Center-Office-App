@@ -47,7 +47,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install google-auth
-        run: pip install --quiet google-auth
+        # requests too: google.auth.transport.requests imports the
+        # requests package, which google-auth doesn't declare as a
+        # dependency -- without it the publish script's ImportError
+        # reads as if google-auth itself were missing.
+        run: pip install --quiet google-auth requests
 
       - name: Write the service account key to a file
         env:
