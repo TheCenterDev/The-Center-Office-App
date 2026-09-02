@@ -1,0 +1,45 @@
+# Brings new card charges from QuickBooks into Receipts, every few hours,
+# so nobody has to download or import anything. Same pattern as the
+# Todoist sync: a small script, credentials in repo secrets.
+#
+# The chain this completes:
+#   Capital One posts a charge
+#     -> QuickBooks picks it up on the bank feed (connected once, in QBO,
+#        by whoever holds the Capital One login)
+#     -> this files it in Receipts under whoever's card it was
+#     -> that person says what it was for; the monthly report reconciles.
+#
+# Secrets needed (repo Settings -> Secrets and variables -> Actions):
+#   FIREBASE_SERVICE_ACCOUNT   the same one the Todoist sync uses
+#   RECEIPTS_WORKER_URL        the Cloudflare worker URL
+#   RECEIPTS_CRON_SECRET       must equal the worker's CRON_SECRET
+#
+# Optional variable:
+#   RECEIPTS_FALLBACK_OWNER    who gets charges on an unrecognised card
+#                              (defaults to brad@thecentercc.com)
+
+name: Receipts — sync from QuickBooks
+
+on:
+  schedule:
+    - cron: "20 */6 * * *"   # every six hours, at :20
+  workflow_dispatch: {}       # and a Run-workflow button
+
+concurrency:
+  group: receipts-qb-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/receipts_qb_sync.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RECEIPTS_WORKER_URL: ${{ secrets.RECEIPTS_WORKER_URL }}
+          RECEIPTS_CRON_SECRET: ${{ secrets.RECEIPTS_CRON_SECRET }}
+          RECEIPTS_FALLBACK_OWNER: ${{ vars.RECEIPTS_FALLBACK_OWNER }}

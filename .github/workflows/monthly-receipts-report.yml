@@ -1,0 +1,43 @@
+# Emails Sarah the receipts-vs-QuickBooks report on the 1st of each
+# month, covering the month that just ended. Same pattern as the
+# Todoist sync: a small script, credentials in repo secrets.
+#
+# Secrets this needs (repo Settings -> Secrets and variables -> Actions):
+#   FIREBASE_SERVICE_ACCOUNT   the service-account JSON (the Todoist sync
+#                              already uses one -- reuse the same secret,
+#                              and if it's stored under another name,
+#                              change the env line below to match)
+#   RECEIPTS_WORKER_URL        the Cloudflare worker URL
+#   RECEIPTS_CRON_SECRET       must equal the worker's CRON_SECRET
+#   GMAIL_APP_PASSWORD         an App Password for the sending Gmail
+#                              account (Google Account -> Security ->
+#                              2-Step Verification -> App passwords)
+#
+# Plain variables (Settings -> ... -> Variables):
+#   REPORT_FROM   e.g. brad@thecentercc.com  (the Gmail that sends)
+#   REPORT_TO     e.g. sarah@thecentercc.com (comma-separate for more)
+
+name: Monthly receipts report
+
+on:
+  schedule:
+    - cron: "0 12 1 * *"   # 12:00 UTC on the 1st = 7/8am Indiana
+  workflow_dispatch: {}     # and a Run-workflow button for testing
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install nodemailer@6
+      - run: node scripts/monthly_receipts_report.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RECEIPTS_WORKER_URL: ${{ secrets.RECEIPTS_WORKER_URL }}
+          RECEIPTS_CRON_SECRET: ${{ secrets.RECEIPTS_CRON_SECRET }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          REPORT_FROM: ${{ vars.REPORT_FROM }}
+          REPORT_TO: ${{ vars.REPORT_TO }}
