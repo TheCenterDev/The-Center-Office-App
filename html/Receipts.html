@@ -380,7 +380,7 @@ const PAYMENTS = ["Capital One card", "Personal - reimburse me", "Check", "ACH /
  * receipt-reader-worker.js for what it is and how to deploy it). Left
  * empty, the tool works exactly as before: photos attach, people type
  * the fields, no QuickBooks report. Nothing else changes. */
-const WORKER_URL = "";
+const WORKER_URL = "https://receipt-reader.steep-term-3e4e.workers.dev";
 
 // Firestore refuses a document over 1 MiB. Photos are held as base64
 // inside one, so cap the encoded string well under that and let the
