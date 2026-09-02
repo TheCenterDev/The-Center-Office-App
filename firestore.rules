@@ -196,21 +196,25 @@ service cloud.firestore {
     }
 
     // Receipts (html/Receipts.html) -- replaces Expensify. Private per
-    // person: staff see and touch only receipts they filed themselves;
-    // Admin/Director see and manage everyone's, because month-end
-    // reconciliation needs the whole picture. createdBy is pinned on
-    // create and immutable after, so a receipt can't be filed as -- or
-    // reassigned to -- someone else.
+    // person: everyone sees and touches only receipts they filed
+    // themselves, except the two people who do month-end reconciliation
+    // -- named here explicitly, per Brad, rather than by app role.
+    // createdBy is pinned on create and immutable after, so a receipt
+    // can't be filed as -- or reassigned to -- someone else.
+    function isReceiptsAdmin() {
+      return emailKey() in ['jake@thecentercc.com', 'brad@thecentercc.com'];
+    }
+
     match /receipts/{receiptId} {
       allow create: if isSignedIn() && hasProfile() &&
         request.resource.data.createdBy == emailKey();
       allow read: if isSignedIn() && hasProfile() &&
-        (resource.data.createdBy == emailKey() || isAdminOrDirector());
+        (resource.data.createdBy == emailKey() || isReceiptsAdmin());
       allow update: if isSignedIn() && hasProfile() &&
         request.resource.data.createdBy == resource.data.createdBy &&
-        (resource.data.createdBy == emailKey() || isAdminOrDirector());
+        (resource.data.createdBy == emailKey() || isReceiptsAdmin());
       allow delete: if isSignedIn() && hasProfile() &&
-        (resource.data.createdBy == emailKey() || isAdminOrDirector());
+        (resource.data.createdBy == emailKey() || isReceiptsAdmin());
     }
 
     // The photo for a receipt, one document per receipt with the same
@@ -221,9 +225,9 @@ service cloud.firestore {
       allow create: if isSignedIn() && hasProfile() &&
         request.resource.data.uploadedBy == emailKey();
       allow read: if isSignedIn() && hasProfile() &&
-        (resource.data.uploadedBy == emailKey() || isAdminOrDirector());
+        (resource.data.uploadedBy == emailKey() || isReceiptsAdmin());
       allow update, delete: if isSignedIn() && hasProfile() &&
-        (resource.data.uploadedBy == emailKey() || isAdminOrDirector());
+        (resource.data.uploadedBy == emailKey() || isReceiptsAdmin());
     }
   }
 }

@@ -107,7 +107,7 @@
 <body>
 <div class="wrap">
   <h1>Receipts</h1>
-  <p class="sub">Photograph a receipt, say what it was for, and it's filed. You see the receipts you filed; Admins see everyone's.</p>
+  <p class="sub">Photograph a receipt, say what it was for, and it's filed. You see the receipts you filed; Jake and Brad see everyone's.</p>
 
   <div id="authGate">
     <div class="card">
@@ -400,7 +400,12 @@ const money = n => (n || 0).toLocaleString("en-US", { style: "currency", currenc
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const monthOf = iso => (iso || "").slice(0, 7);
-const isAdmin = () => me.role === "admin" || me.role === "director";
+// The two people who do month-end: they see everyone's receipts and the
+// export / QuickBooks cards. Named explicitly (per Brad), not by app
+// role. Must match isReceiptsAdmin() in firestore.rules and
+// RECEIPTS_ADMINS in the worker -- the rules are what actually enforce it.
+const RECEIPTS_ADMINS = ["jake@thecentercc.com", "brad@thecentercc.com"];
+const isAdmin = () => RECEIPTS_ADMINS.includes((me.email || "").toLowerCase());
 
 /* A receipt is "Needs info" until it has the three things Sarah cannot
  * reconstruct later: what it cost, what it was for, and proof it
