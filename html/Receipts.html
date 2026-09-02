@@ -252,8 +252,12 @@
       <p class="sub" style="margin-bottom:14px;">Drop in an Expensify export or a Capital One transaction
       download (.csv). It works out which one it is, shows you what it found, and only adds what isn't
       already here — so re-importing the same file twice is safe.</p>
+      <div class="row" style="margin-bottom:14px">
+        <button class="primary" id="impQb" type="button">Bring in new charges from QuickBooks</button>
+        <span class="sub" style="margin:0">Runs on its own every few hours — this is just to check now.</span>
+      </div>
       <div class="drop" id="impDrop">
-        Tap to choose a .csv file
+        …or tap to choose a .csv file (Expensify export, or a Capital One download)
         <input type="file" id="impFile" accept=".csv,text/csv" style="display:none">
       </div>
       <div class="msg" id="impMsg"></div>
@@ -1091,8 +1095,119 @@ function mapExpensifyCategory(raw) {
 const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 function importRefFor(r) {
+  // QuickBooks transactions have a real id of their own; nothing beats it.
+  if (r.qboId) return "qbo_" + r.qboId;
   return ["imp", r.source, r.date, Math.round((r.amount || 0) * 100),
     slug(r.vendor).slice(0, 28) || "x", r.last4 || "x"].join("_");
+}
+
+/* The same charge can reach us by more than one route -- a Capital One
+ * download today, the QuickBooks feed tomorrow -- and those have
+ * different ids. So every row also carries a key describing the
+ * transaction itself, and a row is a duplicate if EITHER key is already
+ * here. Without this, switching to the automatic feed would quietly
+ * double up whatever had already been imported by hand. */
+function naturalRefFor(r) {
+  return ["nat", r.date, Math.round((r.amount || 0) * 100),
+    slug(r.vendor).slice(0, 20) || "x", r.last4 || "x"].join("_");
+}
+
+/* QuickBooks names the account a charge was paid from, e.g.
+ * "Capital One 7556" -- that trailing four is how a charge finds its
+ * person, using the same card mapping the CSV importer builds. */
+function last4From(text) {
+  const m = String(text || "").match(/(\d{4})(?!.*\d)/);
+  return m ? m[1] : "";
+}
+
+function normaliseQbo(expenses) {
+  return expenses.map(e => {
+    const last4 = last4From(e.paidFrom);
+    // Sarah codes purchases as she accepts them, so most arrive with
+    // their account already set; match it to the chart of accounts.
+    const hit = e.category
+      ? categories.find(c => e.category.toLowerCase().includes(c.name.toLowerCase()))
+      : null;
+    return {
+      source: "quickbooks",
+      qboId: e.id,
+      date: e.date,
+      vendor: e.vendor,
+      amount: e.amount,
+      refund: e.amount < 0,
+      category: hit ? hit.name : "",
+      categoryCode: hit ? hit.code : "",
+      originalCategory: !hit && e.category ? e.category : "",
+      payment: /credit/i.test(e.payment || "") ? "Capital One card"
+        : /check/i.test(e.payment || "") ? "Check"
+        : /cash/i.test(e.payment || "") ? "Cash" : "Capital One card",
+      last4: last4,
+      notes: e.memo || "",
+      owner: impCardOwners[last4] || "",
+    };
+  }).filter(r => r.date && r.amount);
+}
+
+$("impQb").addEventListener("click", async () => {
+  const msg = $("impMsg");
+  msg.className = "msg";
+  msg.textContent = "Asking QuickBooks for recent charges…";
+  $("impPreview").style.display = "none";
+  $("impQb").disabled = true;
+  try {
+    // A five-week window: long enough to catch anything that posted
+    // late, and duplicates are filtered out anyway.
+    const to = todayISO();
+    const from = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
+    const outQ = await qbFetch("/qb/expenses?from=" + from + "&to=" + to);
+    if (outQ.notConnected || outQ.reconnect) {
+      msg.className = "msg bad";
+      msg.textContent = outQ.notConnected
+        ? "QuickBooks isn't connected yet — connect it in the Monthly Report card below."
+        : "The QuickBooks connection has lapsed — reconnect it in the Monthly Report card below.";
+      return;
+    }
+    if (!outQ.ok) throw new Error(outQ.error || "QuickBooks didn't answer.");
+    await loadCardOwners();
+    const rowsIn = normaliseQbo(outQ.expenses || []);
+    if (!rowsIn.length) {
+      msg.textContent = "QuickBooks has no charges in the last five weeks.";
+      return;
+    }
+    await markDuplicates(rowsIn);
+    impRows = rowsIn;
+    const fresh = impRows.filter(r => !r.duplicate).length;
+    msg.className = "msg ok";
+    msg.textContent = "QuickBooks has " + impRows.length + " charge(s) in the last five weeks; " +
+      fresh + " of them are new here.";
+    renderImportPreview("quickbooks");
+  } catch (err) {
+    msg.className = "msg bad";
+    msg.textContent = "Couldn't reach QuickBooks: " + err.message;
+  } finally {
+    $("impQb").disabled = false;
+  }
+});
+
+/* Flags rows already present, by either key, looking only at the months
+ * the incoming rows actually touch. */
+async function markDuplicates(rowsIn) {
+  const months = [...new Set(rowsIn.map(r => monthOf(r.date)).filter(Boolean))];
+  const haveImport = new Set(), haveNatural = new Set();
+  for (const m of months) {
+    (await fetchReceiptsMonth(m)).forEach(r => {
+      if (r.importRef) haveImport.add(r.importRef);
+      if (r.naturalRef) haveNatural.add(r.naturalRef);
+    });
+  }
+  const seen = {};
+  rowsIn.forEach(r => {
+    const base = importRefFor(r);
+    seen[base] = (seen[base] || 0) + 1;
+    r.importRef = seen[base] > 1 ? base + "_" + seen[base] : base;
+    r.naturalRef = naturalRefFor(r);
+    r.duplicate = haveImport.has(r.importRef) || haveNatural.has(r.naturalRef);
+  });
 }
 
 function normaliseImport(objs, format) {
@@ -1206,19 +1321,7 @@ async function readImport(file) {
     const refunds = usable.filter(r => r.refund).length;
     if (!usable.length) throw new Error("Nothing in that file could be imported as an expense.");
 
-    // Which of these are already here? Check the months involved.
-    const months = [...new Set(usable.map(r => monthOf(r.date)).filter(Boolean))];
-    const existing = new Set();
-    for (const m of months) {
-      (await fetchReceiptsMonth(m)).forEach(r => { if (r.importRef) existing.add(r.importRef); });
-    }
-    const seen = {};
-    usable.forEach(r => {
-      const base = importRefFor(r);
-      seen[base] = (seen[base] || 0) + 1;
-      r.importRef = seen[base] > 1 ? base + "_" + seen[base] : base;   // identical-but-separate charges
-      r.duplicate = existing.has(r.importRef);
-    });
+    await markDuplicates(usable);
 
     impRows = usable;
     const label = format === "capitalone" ? "Capital One download" : "Expensify export";
@@ -1344,6 +1447,7 @@ $("impGo").addEventListener("click", async () => {
       source: r.source,
       refund: !!r.refund,
       importRef: r.importRef,
+      naturalRef: r.naturalRef || naturalRefFor(r),
       importedBy: me.email,
       importedAt: now,
     };
