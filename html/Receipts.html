@@ -107,7 +107,7 @@
 <body>
 <div class="wrap">
   <h1>Receipts</h1>
-  <p class="sub">Photograph a receipt, say what it was for, and it's filed. Shared live across everyone signed in, on any device.</p>
+  <p class="sub">Photograph a receipt, say what it was for, and it's filed. You see the receipts you filed; Admins see everyone's.</p>
 
   <div id="authGate">
     <div class="card">
@@ -244,7 +244,9 @@
     </div>
 
     <!-- ------------------------------------------------------- export -->
-    <div class="card">
+    <!-- Month-end work: exports, reconciliation, marking things done.
+         Admin/Director only; staff just file receipts. -->
+    <div class="card" id="exportCard" style="display:none">
       <h2>Export</h2>
       <p class="sub" style="margin-bottom:14px;">Exports cover whatever the filters above are showing right now.</p>
       <div class="exportbar">
@@ -491,7 +493,7 @@ function startApp(profile) {
   buildMonthOptions();
   $("date").value = todayISO();
   loadAccounts();
-  qbShowCard();
+  showAdminCards();
   load();
 }
 
@@ -741,6 +743,52 @@ $("saveBtn").addEventListener("click", async () => {
 
 // ---------------------------------------------------------------- load --
 
+/* Staff load only their own receipts; Admin/Director load everyone's.
+ * This isn't just what the page shows -- the database rules refuse a
+ * broader read, and Firestore refuses a QUERY it can't prove safe. So a
+ * staff query must literally say "month is X and createdBy is me": the
+ * shared session layer only does single-field queries, hence this
+ * compound one done directly. */
+const FS_QUERY = "https://firestore.googleapis.com/v1/projects/the-center-office-app/databases/(default)/documents:runQuery";
+function fsDecode(v) {
+  if ("stringValue" in v) return v.stringValue;
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("integerValue" in v) return parseInt(v.integerValue, 10);
+  if ("doubleValue" in v) return v.doubleValue;
+  return null;
+}
+async function fetchReceiptsMonth(month) {
+  const eq = (field, value) => ({ fieldFilter: { field: { fieldPath: field }, op: "EQUAL",
+    value: { stringValue: value } } });
+  const filters = [eq("month", month)];
+  if (!isAdmin()) filters.push(eq("createdBy", me.email));
+  const body = { structuredQuery: {
+    from: [{ collectionId: "receipts" }],
+    where: filters.length === 1 ? filters[0] : { compositeFilter: { op: "AND", filters: filters } },
+    limit: 500,
+  } };
+  const token = await CenterSession.getToken();
+  const res = await fetch(FS_QUERY, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let message = "";
+    try { message = JSON.parse(await res.text()).error.message; } catch (e) {}
+    throw new Error(message || ("Couldn't load receipts (" + res.status + ")"));
+  }
+  const out = [];
+  (await res.json() || []).forEach(row => {
+    if (!row.document) return;
+    const data = {};
+    Object.keys(row.document.fields || {}).forEach(k => { data[k] = fsDecode(row.document.fields[k]); });
+    data.id = row.document.name.split("/").pop();
+    out.push(data);
+  });
+  return out;
+}
+
 async function load() {
   const listMsg = $("listMsg");
   listMsg.className = "msg";
@@ -748,8 +796,7 @@ async function load() {
   const pick = $("fMonth").value;
   const months = pick === "FY" ? fiscalMonths() : [pick];
   try {
-    const batches = await Promise.all(
-      months.map(m => CenterSession.queryCollection("receipts", "month", "EQUAL", m)));
+    const batches = await Promise.all(months.map(fetchReceiptsMonth));
     rows = batches.flat().sort((a, b) =>
       (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
     listMsg.textContent = "";
@@ -1136,8 +1183,16 @@ $("expMark").addEventListener("click", async () => {
  */
 let qbLastReportHtml = "";
 
+function showAdminCards() {
+  $("exportCard").style.display = isAdmin() ? "block" : "none";
+  qbShowCard();
+}
+
 function qbShowCard() {
-  $("qbCard").style.display = WORKER_URL ? "block" : "none";
+  // The report compares ALL receipts against ALL QuickBooks purchases --
+  // a whole-org view, so it only exists for Admin/Director. (The worker
+  // enforces the same server-side; hiding it here is just honesty.)
+  $("qbCard").style.display = (WORKER_URL && isAdmin()) ? "block" : "none";
 }
 
 function reportRange() {
