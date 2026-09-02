@@ -243,6 +243,37 @@
       <div class="msg" id="listMsg"></div>
     </div>
 
+    <!-- ------------------------------------------------------- import -->
+    <!-- Bulk entry. Most spend arrives as a file -- the Expensify export
+         or the Capital One transaction download -- not as photographs,
+         so this is the main way rows get in. Admin only. -->
+    <div class="card" id="importCard" style="display:none">
+      <h2>Import a spreadsheet</h2>
+      <p class="sub" style="margin-bottom:14px;">Drop in an Expensify export or a Capital One transaction
+      download (.csv). It works out which one it is, shows you what it found, and only adds what isn't
+      already here — so re-importing the same file twice is safe.</p>
+      <div class="drop" id="impDrop">
+        Tap to choose a .csv file
+        <input type="file" id="impFile" accept=".csv,text/csv" style="display:none">
+      </div>
+      <div class="msg" id="impMsg"></div>
+      <div id="impPreview" style="margin-top:14px; display:none">
+        <div class="stats" id="impStats"></div>
+        <div id="impOwners"></div>
+        <div class="tablewrap" style="max-height:340px; overflow-y:auto">
+          <table>
+            <thead><tr><th>Date</th><th>Vendor</th><th style="text-align:right">Amount</th>
+              <th>Category</th><th>Card</th><th>Whose</th><th></th></tr></thead>
+            <tbody id="impBody"></tbody>
+          </table>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button class="primary" id="impGo" type="button">Import them</button>
+          <button class="ghost" id="impCancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ------------------------------------------------------- export -->
     <!-- Month-end work: exports, reconciliation, marking things done.
          Admin/Director only; staff just file receipts. -->
@@ -371,6 +402,24 @@ async function loadAccounts() {
   } catch (e) { /* fallback list already in place */ }
 }
 
+/* The roster, for putting a name to an imported card charge. Only used
+ * by the importer's "whose card is this" mapping; everything else takes
+ * the name from whoever is signed in. */
+const PEOPLE = [
+  { email: "jeff@thecentercc.com", name: "Jeff Wike" },
+  { email: "brad@thecentercc.com", name: "Brad Boyles" },
+  { email: "jake@thecentercc.com", name: "Jake Johnson" },
+  { email: "shawna@thecentercc.com", name: "Shawna Balsiger" },
+  { email: "dave@thecentercc.com", name: "Dave Wieringa" },
+  { email: "sarah@thecentercc.com", name: "Sarah Johnson" },
+  { email: "isaiah@thecentercc.com", name: "Isaiah Humiston" },
+  { email: "tim@thecentercc.com", name: "Tim LaRue" },
+  { email: "amanda@thecentercc.com", name: "Amanda Chapple" },
+  { email: "kylee@thecentercc.com", name: "Kylee Gudeman" },
+  { email: "liam@thecentercc.com", name: "Liam Strong" },
+  { email: "natalee@thecentercc.com", name: "Natalee Wieringa" },
+];
+
 const SITES = ["Columbia City", "Whitko", "Churubusco", "Shared / multi-site", "Not site specific"];
 const PROGRAMS = ["", "ASC", "SERVE", "Ground Zero", "Summer Central", "LifeWise Academy",
   "Life Coaching", "Thrive Challenge / Thrive 100", "iLead", "Trips & Experiences",
@@ -412,14 +461,17 @@ const isAdmin = () => RECEIPTS_ADMINS.includes((me.email || "").toLowerCase());
  * happened. Derived rather than set by hand -- one less field to forget. */
 function statusOf(r) {
   if (r.exported) return "Exported";
-  if (!r.amount || !r.category || !r.hasImage) return "Needs info";
+  if (!r.amount || !r.category) return "Needs info";
+  // An imported row's proof is the statement or the Expensify record it
+  // came from, so it isn't chased for a photograph it will never have.
+  if (!r.hasImage && !r.source) return "Needs info";
   return "Ready";
 }
 function missingBits(r) {
   const gaps = [];
   if (!r.amount) gaps.push("amount");
   if (!r.category) gaps.push("category");
-  if (!r.hasImage) gaps.push("photo");
+  if (!r.hasImage && !r.source) gaps.push("photo");
   return gaps;
 }
 
@@ -952,6 +1004,374 @@ $("tbody").addEventListener("click", async e => {
   }
 });
 
+/* ------------------------------------------------------------- import --
+ *
+ * Most of this organisation's spend arrives as a file, not a photograph:
+ * the Expensify export while that account is being wound down, and the
+ * Capital One transaction download from then on. So this reads either,
+ * works out which it is from the column headings, and adds only rows
+ * that aren't already here.
+ *
+ * Re-importing the same file must be harmless, because it will happen --
+ * somebody will wonder whether it worked and do it again. Every row gets
+ * a deterministic id built from what makes it that transaction (source,
+ * date, amount, vendor, card), so a second import of the same file
+ * writes the same ids and changes nothing. Two genuinely separate but
+ * identical charges on one day are kept apart by a counter suffix
+ * rather than silently merged.
+ */
+
+// Parsed rows waiting for the Import button.
+let impRows = [];
+let impCardOwners = {};   // last4 -> email, remembered between imports
+
+/* RFC-4180-ish: fields may be quoted, contain commas and newlines, and
+ * escape a quote by doubling it. Expensify's exports do all three. */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  text = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(v => String(v).trim() !== ""));
+}
+
+function csvObjects(text) {
+  const rows = parseCsv(text);
+  if (!rows.length) return [];
+  const head = rows[0].map(h => h.trim());
+  return rows.slice(1).map(r => {
+    const o = {};
+    head.forEach((h, i) => { o[h] = (r[i] == null ? "" : String(r[i]).trim()); });
+    return o;
+  });
+}
+
+function detectFormat(head) {
+  const has = name => head.some(h => h.toLowerCase() === name);
+  if (has("submitter email") && has("merchant")) return "expensify-full";
+  if (has("receipt url") && has("merchant")) return "expensify-basic";
+  if (has("transaction date") && has("card no.")) return "capitalone";
+  return null;
+}
+
+/* Expensify writes a category as the QuickBooks account, code and all:
+ *   "7039  Repairs & Maintenance:7041.4 Fire Expenses"
+ * Master account before the colon, sub-account after. Prefer the
+ * sub-account when it exists in the chart of accounts, since that is
+ * the more precise answer; otherwise fall back to the master. */
+function mapExpensifyCategory(raw) {
+  if (!raw) return { category: "", code: "" };
+  const parts = String(raw).split(":").map(p => p.trim()).filter(Boolean);
+  const candidates = parts.slice().reverse();       // most specific first
+  for (const part of candidates) {
+    const m = part.match(/^([0-9][0-9.\-]*)\s+(.*)$/);
+    const code = m ? m[1] : "";
+    const name = (m ? m[2] : part).trim();
+    const hit = categories.find(c =>
+      c.name.toLowerCase() === name.toLowerCase() ||
+      (code && c.code && c.code === code));
+    if (hit) return { category: hit.name, code: hit.code || code };
+  }
+  // Nothing matched the chart of accounts -- leave it uncategorised
+  // rather than invent an account, and keep the original for reference.
+  return { category: "", code: "", original: String(raw) };
+}
+
+const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+function importRefFor(r) {
+  return ["imp", r.source, r.date, Math.round((r.amount || 0) * 100),
+    slug(r.vendor).slice(0, 28) || "x", r.last4 || "x"].join("_");
+}
+
+function normaliseImport(objs, format) {
+  const out = [];
+  objs.forEach(o => {
+    const get = name => {
+      const key = Object.keys(o).find(k => k.toLowerCase() === name);
+      return key ? o[key] : "";
+    };
+    if (format === "capitalone") {
+      const debit = parseFloat(get("debit") || "0");
+      const credit = parseFloat(get("credit") || "0");
+      const bankCategory = get("category");
+      let amount = 0;
+      if (debit > 0) {
+        amount = debit;
+      } else if (credit > 0) {
+        /* Two very different things arrive as credits. Paying the card
+         * off and cash back ("Payment/Credit") are not spending and must
+         * not become expenses. A credit filed under a spending category
+         * is a refund of a purchase -- that one belongs here, negative,
+         * or the month's total is overstated by whatever came back. */
+        if (/payment|credit/i.test(bankCategory)) { out.push({ skip: "payment" }); return; }
+        amount = -credit;
+      } else {
+        out.push({ skip: "zero" });
+        return;
+      }
+      const last4 = (get("card no.") || "").replace(/\D/g, "").slice(-4);
+      out.push({
+        source: "capitalone",
+        date: get("transaction date"),
+        vendor: get("description"),
+        amount: Math.round(amount * 100) / 100,
+        refund: amount < 0,
+        category: "", categoryCode: "",
+        bankCategory: bankCategory,
+        payment: "Capital One card",
+        last4: last4,
+        notes: "",
+        owner: impCardOwners[last4] || "",
+      });
+      return;
+    }
+    // both Expensify shapes
+    // A negative Expensify amount is a return -- "wrenches returned".
+    // Keep it: dropping returns overstates the month.
+    const amount = parseFloat(get("amount") || "0");
+    if (!amount || isNaN(amount)) { out.push({ skip: "zero" }); return; }
+    const mapped = mapExpensifyCategory(get("category"));
+    const type = (get("transaction type") || get("type") || "").toLowerCase();
+    const reimbursable = (get("reimbursable") || "").toLowerCase();
+    const payment = /cash/.test(type) ? "Cash"
+      : (reimbursable === "y" || reimbursable === "true") ? "Personal - reimburse me"
+      : "Capital One card";
+    const last4 = (get("card details") || "").replace(/\D/g, "").slice(-4);
+    out.push({
+      source: "expensify",
+      date: get("date"),
+      vendor: get("merchant"),
+      amount: Math.round(amount * 100) / 100,
+      category: mapped.category,
+      categoryCode: mapped.code,
+      refund: amount < 0,
+      originalCategory: mapped.original || "",
+      payment: payment,
+      last4: last4,
+      notes: get("description"),
+      owner: (get("submitter email") || "").toLowerCase(),
+      expensifyReceiptUrl: get("receipt") || get("receipt url") || "",
+    });
+  });
+  return out;
+}
+
+$("impDrop").addEventListener("click", () => $("impFile").click());
+$("impDrop").addEventListener("dragover", e => e.preventDefault());
+$("impDrop").addEventListener("drop", e => {
+  e.preventDefault();
+  if (e.dataTransfer.files && e.dataTransfer.files[0]) readImport(e.dataTransfer.files[0]);
+});
+$("impFile").addEventListener("change", e => { if (e.target.files[0]) readImport(e.target.files[0]); });
+$("impCancel").addEventListener("click", () => {
+  impRows = [];
+  $("impPreview").style.display = "none";
+  $("impFile").value = "";
+  $("impMsg").textContent = "";
+  $("impDrop").className = "drop";
+  $("impDrop").childNodes[0].nodeValue = "Tap to choose a .csv file";
+});
+
+async function readImport(file) {
+  const msg = $("impMsg");
+  msg.className = "msg";
+  msg.textContent = "Reading " + file.name + "…";
+  $("impPreview").style.display = "none";
+  try {
+    const text = await file.text();
+    const objs = csvObjects(text);
+    if (!objs.length) throw new Error("That file has no rows in it.");
+    const format = detectFormat(Object.keys(objs[0]).map(h => h.toLowerCase()));
+    if (!format) {
+      throw new Error("That doesn't look like an Expensify export or a Capital One " +
+        "download. Expected columns like Merchant/Amount/Date, or Transaction Date/Card No./Debit.");
+    }
+    await loadCardOwners();
+    const parsed = normaliseImport(objs, format);
+    const usable = parsed.filter(r => !r.skip);
+    const payments = parsed.filter(r => r.skip === "payment").length;
+    const zeros = parsed.filter(r => r.skip === "zero").length;
+    const refunds = usable.filter(r => r.refund).length;
+    if (!usable.length) throw new Error("Nothing in that file could be imported as an expense.");
+
+    // Which of these are already here? Check the months involved.
+    const months = [...new Set(usable.map(r => monthOf(r.date)).filter(Boolean))];
+    const existing = new Set();
+    for (const m of months) {
+      (await fetchReceiptsMonth(m)).forEach(r => { if (r.importRef) existing.add(r.importRef); });
+    }
+    const seen = {};
+    usable.forEach(r => {
+      const base = importRefFor(r);
+      seen[base] = (seen[base] || 0) + 1;
+      r.importRef = seen[base] > 1 ? base + "_" + seen[base] : base;   // identical-but-separate charges
+      r.duplicate = existing.has(r.importRef);
+    });
+
+    impRows = usable;
+    const label = format === "capitalone" ? "Capital One download" : "Expensify export";
+    msg.className = "msg ok";
+    msg.textContent = "Read " + usable.length + " transaction(s) from that " + label + "." +
+      (refunds ? " " + refunds + " of them are refunds, kept as negatives so the total ties out." : "") +
+      (payments ? " " + payments + " card payment(s) and cash back left out — those aren't spending." : "") +
+      (zeros ? " " + zeros + " zero-amount row(s) skipped." : "");
+    $("impDrop").className = "drop has";
+    $("impDrop").childNodes[0].nodeValue = file.name + " — tap to choose a different file";
+    renderImportPreview(format);
+  } catch (err) {
+    msg.className = "msg bad";
+    msg.textContent = err.message;
+    $("impDrop").className = "drop err";
+  }
+}
+
+/* Capital One's download says which card, never who. Expensify's says
+ * both -- so importing that first teaches this mapping, and card
+ * downloads afterwards land on the right person automatically. */
+async function loadCardOwners() {
+  if (Object.keys(impCardOwners).length) return;
+  const doc = await CenterSession.getDoc("receipts_config", "card_owners").catch(() => null);
+  impCardOwners = (doc && doc.owners) || {};
+}
+
+async function saveCardOwners(learned) {
+  const merged = Object.assign({}, impCardOwners, learned);
+  const changed = JSON.stringify(merged) !== JSON.stringify(impCardOwners);
+  impCardOwners = merged;
+  if (changed) {
+    await CenterSession.setDoc("receipts_config", "card_owners",
+      { owners: merged, updatedAt: new Date().toISOString(), updatedBy: me.email }).catch(() => {});
+  }
+}
+
+function renderImportPreview(format) {
+  const fresh = impRows.filter(r => !r.duplicate);
+  const dupes = impRows.length - fresh.length;
+  const uncategorised = fresh.filter(r => !r.category).length;
+  const total = fresh.reduce((s, r) => s + r.amount, 0);
+  $("impStats").innerHTML = [
+    [fresh.length, "To import"],
+    [money(total), "Their total"],
+    [dupes, "Already here"],
+    [uncategorised, "Need a category"],
+  ].map(([n, l], i) => '<div class="stat ' + ((i === 3 && uncategorised) ? "warn" : "") + '">' +
+    '<div class="n">' + n + '</div><div class="l">' + l + "</div></div>").join("");
+
+  // Whose card is it? Only needed when the file didn't say.
+  const needOwner = [...new Set(fresh.filter(r => !r.owner && r.last4).map(r => r.last4))].sort();
+  $("impOwners").innerHTML = needOwner.length
+    ? '<div class="card" style="background:#fafbfc;margin:14px 0"><h2>Whose cards are these?</h2>' +
+      '<p class="sub" style="margin-bottom:12px">The download gives the card number but not the person. ' +
+      "Set it once and it's remembered for next time.</p>" +
+      '<div class="formgrid">' + needOwner.map(l4 =>
+        '<div><label class="fl">Card ending ' + esc(l4) + '</label>' +
+        '<select data-owner="' + esc(l4) + '"><option value="">— leave with me —</option>' +
+        PEOPLE.map(p => '<option value="' + esc(p.email) + '">' + esc(p.name) + "</option>").join("") +
+        "</select></div>").join("") + "</div></div>"
+    : "";
+  $("impOwners").querySelectorAll("select[data-owner]").forEach(sel => {
+    if (impCardOwners[sel.dataset.owner]) sel.value = impCardOwners[sel.dataset.owner];
+    sel.addEventListener("change", () => renderImportPreview(format));
+  });
+
+  $("impBody").innerHTML = impRows.map(r => {
+    const ownerSel = r.owner || impCardOwners[r.last4] || "";
+    const who = ownerSel ? (PEOPLE.find(p => p.email === ownerSel) || {}).name || ownerSel : me.name;
+    return "<tr" + (r.duplicate ? ' style="opacity:.45"' : "") + ">" +
+      '<td class="day">' + esc(r.date) + "</td>" +
+      "<td>" + esc(r.vendor) +
+        (r.notes ? '<div class="note">' + esc(r.notes) + "</div>" : "") + "</td>" +
+      '<td class="amt"' + (r.refund ? ' style="color:#1a7f4e"' : "") + ">" + money(r.amount) +
+        (r.refund ? '<div class="note" style="color:#1a7f4e">refund</div>' : "") + "</td>" +
+      "<td>" + (r.category ? esc(catLabel(r.category))
+        : '<span class="tag needs">needs one</span>' +
+          (r.originalCategory ? '<div class="note">was: ' + esc(r.originalCategory) + "</div>"
+            : r.bankCategory ? '<div class="note">bank said: ' + esc(r.bankCategory) + "</div>" : "")) + "</td>" +
+      "<td>" + (r.last4 ? "·" + esc(r.last4) : esc(r.payment)) + "</td>" +
+      "<td>" + esc(who) + "</td>" +
+      "<td>" + (r.duplicate ? '<span class="tag exported">already here</span>' : "") + "</td>" +
+      "</tr>";
+  }).join("");
+  $("impPreview").style.display = "block";
+  $("impGo").disabled = fresh.length === 0;
+  $("impGo").textContent = fresh.length ? "Import " + fresh.length + " expense(s)" : "Nothing new to import";
+}
+
+$("impGo").addEventListener("click", async () => {
+  const fresh = impRows.filter(r => !r.duplicate);
+  if (!fresh.length) return;
+  const msg = $("impMsg");
+  $("impGo").disabled = true;
+
+  // Take any card-owner choices made above, and remember them.
+  const chosen = {};
+  $("impOwners").querySelectorAll("select[data-owner]").forEach(sel => {
+    if (sel.value) chosen[sel.dataset.owner] = sel.value;
+  });
+  // Expensify files state the submitter outright -- learn card owners from that.
+  const learned = Object.assign({}, chosen);
+  fresh.forEach(r => { if (r.source === "expensify" && r.last4 && r.owner) learned[r.last4] = r.owner; });
+  await saveCardOwners(learned);
+
+  let done = 0, failed = 0;
+  for (const r of fresh) {
+    const owner = r.owner || impCardOwners[r.last4] || me.email;
+    const person = PEOPLE.find(p => p.email === owner);
+    const now = new Date().toISOString();
+    const record = {
+      date: r.date, month: monthOf(r.date), vendor: r.vendor, amount: r.amount,
+      category: r.category, categoryCode: r.categoryCode || catCode(r.category),
+      site: "Not site specific", program: "",
+      payment: r.payment, last4: r.last4 || "",
+      notes: r.notes || "",
+      hasImage: false, imageMime: "",
+      exported: false, exportedAt: "",
+      paidBy: person ? person.name : owner,
+      createdBy: owner,          // so it shows up as that person's receipt
+      createdAt: now, updatedAt: now,
+      source: r.source,
+      refund: !!r.refund,
+      importRef: r.importRef,
+      importedBy: me.email,
+      importedAt: now,
+    };
+    if (r.expensifyReceiptUrl) record.expensifyReceiptUrl = r.expensifyReceiptUrl;
+    if (r.originalCategory) record.originalCategory = r.originalCategory;
+    if (r.bankCategory) record.bankCategory = r.bankCategory;
+    try {
+      await CenterSession.setDoc("receipts", r.importRef, record);
+      r.duplicate = true;       // so a second press can't double up
+      done++;
+    } catch (err) {
+      failed++;
+      msg.className = "msg bad";
+      msg.textContent = "Stopped after " + done + ": " + err.message;
+      break;
+    }
+  }
+  if (!failed) {
+    msg.className = "msg ok";
+    const need = fresh.filter(r => !r.category).length;
+    msg.textContent = "Imported " + done + " expense(s)." +
+      (need ? " " + need + " still need a category — they're in the list below as Needs info." : "");
+  }
+  $("impGo").disabled = false;
+  renderImportPreview();
+  await load();
+});
+
 // ------------------------------------------------------- receipt viewer --
 
 $("vClose").addEventListener("click", () => $("viewer").classList.remove("open"));
@@ -1190,6 +1610,7 @@ let qbLastReportHtml = "";
 
 function showAdminCards() {
   $("exportCard").style.display = isAdmin() ? "block" : "none";
+  $("importCard").style.display = isAdmin() ? "block" : "none";
   qbShowCard();
 }
 
